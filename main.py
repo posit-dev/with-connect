@@ -1,0 +1,166 @@
+import argparse
+import base64
+import os
+import socket
+import subprocess
+import sys
+import time
+
+import docker
+
+
+
+IMAGE = "rstudio/rstudio-connect"
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run RStudio Connect with optional command execution")
+    parser.add_argument("--version", default="2025.09.0", help="RStudio Connect version (default: 2025.09.0)")
+
+    # Handle -- separator and capture remaining args
+    if "--" in sys.argv:
+        separator_index = sys.argv.index("--")
+        main_args = sys.argv[1:separator_index]
+        command_args = sys.argv[separator_index + 1:]
+    else:
+        main_args = sys.argv[1:]
+        command_args = []
+
+    args = parser.parse_args(main_args)
+    args.command = command_args
+    return args
+
+
+def main():
+    args = parse_args()
+
+    client = docker.from_env()
+    tag = f"jammy-{args.version}"
+
+    bootstrap_secret = base64.b64encode(os.urandom(32)).decode("utf-8")
+
+    # Ensure image is pulled from Docker Hub
+    print(f"Pulling image {IMAGE}:{tag}...")
+    try:
+        image = client.images.pull(IMAGE, tag=tag)
+        print(f"Successfully pulled {image.short_id}")
+    except Exception as e:
+        print(f"Failed to pull image: {e}")
+        return
+
+    container = client.containers.run(
+        image=f"{IMAGE}:{tag}",
+        detach=True,  # run in background; remove for foreground
+        tty=True,  # equivalent to `-t`
+        stdin_open=True,  # equivalent to `-i`
+        privileged=True,  # equivalent to `--privileged`
+        ports={"3939/tcp": 3939},  # equivalent to `-p 3939:3939`
+        mounts=[
+            # equivalent to --mount type=bind,ro,src=./rstudio-connect.lic,dst=/var/lib/rstudio-connect/rstudio-connect.lic \
+            docker.types.services.Mount(
+                type="bind",
+                read_only=True,
+                source=f"{os.getcwd()}/rstudio-connect.lic",
+                target="/var/lib/rstudio-connect/rstudio-connect.lic",
+            ),
+            # equivalent to --mount type=bind,ro,src=./rstudio-connect.gcfg,dst=/etc/rstudio-connect/rstudio-connect.gcfg \
+            # docker.types.services.Mount(
+            #     type="bind",
+            #     read_only=True,
+            #     source=f"{os.getcwd()}/rstudio-connect.gcfg",
+            #     target="/etc/rstudio-connect/rstudio-connect.gcfg",
+            # ),
+        ],
+        environment={
+            # "CONNECT_TENSORFLOW_ENABLED": "false",
+            "CONNECT_BOOTSTRAP_ENABLED": "true",
+            "CONNECT_BOOTSTRAP_SECRETKEY": bootstrap_secret,
+        },
+    )
+
+    print("Waiting for port 3939 to open...")
+    if not is_port_open("localhost", 3939, timeout=60.0):
+        print("RStudio Connect did not start within 60 seconds.")
+        container.stop()
+        return
+
+    print("Waiting for HTTP server to start...")
+    if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
+        print("RStudio Connect did not log HTTP server start within 60 seconds.")
+        container.stop()
+        return
+
+    api_key = get_api_key(bootstrap_secret)
+
+    # Execute user command if provided
+    if args.command:
+        try:
+            env = {**os.environ, "CONNECT_API_KEY": api_key, "CONNECT_SERVER": "http://localhost:3939"}
+            result = subprocess.run(args.command, check=True, text=True, capture_output=True, env=env)
+            print(result.stdout)
+            if result.stderr:
+                print(f"Command stderr: {result.stderr}")
+        except subprocess.CalledProcessError as e:
+            print(f"Command failed with exit code {e.returncode}: {e.stderr}")
+
+    container.stop()
+
+def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
+    """
+    Check if a TCP port on a given host is open.
+
+    :param host: Hostname or IP address to check.
+    :param port: Port number to check.
+    :param timeout: Timeout in seconds (default 3.0).
+    :return: True if the port is open (accepting connections), False otherwise.
+    """
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (socket.timeout, ConnectionRefusedError, OSError):
+        return False
+
+def wait_for_http_server(
+    container, timeout: float = 60.0, poll_interval: float = 2.0
+) -> bool:
+    """
+    Wait until the container logs contain the line:
+        'Starting HTTP server on [::]:3939'
+
+    :param container: docker.models.containers.Container instance
+    :param timeout: Maximum seconds to wait (default 60)
+    :param poll_interval: Seconds between log checks (default 2)
+    :return: True if message found before timeout, False otherwise
+    """
+    target = "Starting HTTP server on [::]:3939"
+    deadline = time.time() + timeout
+
+    while time.time() < deadline:
+        logs = container.logs().decode("utf-8", errors="ignore")
+
+        if target in logs:
+            return True
+        time.sleep(poll_interval)
+    return False
+
+def get_api_key(bootstrap_secret: str) -> str:
+    result = subprocess.run(
+        [
+            "rsconnect",
+            "bootstrap",
+            "-i",
+            "-s",
+            "http://localhost:3939",
+            "--raw",
+        ],
+        check=True,
+        text=True,
+        env={**os.environ, "CONNECT_BOOTSTRAP_SECRETKEY": bootstrap_secret},
+        capture_output=True,
+    )
+
+    return result.stdout.strip()
+
+
+if __name__ == "__main__":
+    main()
