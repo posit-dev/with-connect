@@ -15,9 +15,10 @@ IMAGE = "rstudio/rstudio-connect"
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run Posit Connect with optional command execution")
-    parser.add_argument("--version", default="2025.09.0", help="RStudio Connect version (default: 2025.09.0)")
+    parser.add_argument("--version", default="2025.09.0", help="Posit Connect version (default: 2025.09.0)")
+    parser.add_argument("--license", default="./rstudio-connect.lic", help="Path to RStudio Connect license file (default: ./rstudio-connect.lic)")
     parser.add_argument("--config", help="Path to rstudio-connect.gcfg configuration file")
-    parser.add_argument("--license", default="./rstudio-connect.lic", help="Path to Posit Connect license file (default: ./rstudio-connect.lic)")
+    parser.add_argument("-e", "--env", action="append", dest="env_vars", help="Environment variables to pass to command (format: KEY=VALUE)")
 
     # Handle -- separator and capture remaining args
     if "--" in sys.argv:
@@ -122,12 +123,14 @@ def main():
     if args.command:
         try:
             env = {**os.environ, "CONNECT_API_KEY": api_key, "CONNECT_SERVER": "http://localhost:3939"}
-            result = subprocess.run(args.command, check=True, text=True, capture_output=True, env=env)
-            print(result.stdout)
-            if result.stderr:
-                print(f"Command stderr: {result.stderr}")
+            if args.env_vars:
+                for env_var in args.env_vars:
+                    if "=" in env_var:
+                        key, value = env_var.split("=", 1)
+                        env[key] = value
+            result = subprocess.run(args.command, check=True, env=env)
+            exit_code = result.returncode
         except subprocess.CalledProcessError as e:
-            print(f"Command failed with exit code {e.returncode}: {e.stderr}")
             exit_code = e.returncode
 
     container.stop()
