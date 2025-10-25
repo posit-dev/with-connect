@@ -16,6 +16,7 @@ IMAGE = "rstudio/rstudio-connect"
 def parse_args():
     parser = argparse.ArgumentParser(description="Run RStudio Connect with optional command execution")
     parser.add_argument("--version", default="2025.09.0", help="RStudio Connect version (default: 2025.09.0)")
+    parser.add_argument("--config", help="Path to rstudio-connect.gcfg configuration file")
 
     # Handle -- separator and capture remaining args
     if "--" in sys.argv:
@@ -48,29 +49,33 @@ def main():
         print(f"Failed to pull image: {e}")
         return
 
-    container = client.containers.run(
-        image=f"{IMAGE}:{tag}",
-        detach=True,  # run in background; remove for foreground
-        tty=True,  # equivalent to `-t`
-        stdin_open=True,  # equivalent to `-i`
-        privileged=True,  # equivalent to `--privileged`
-        ports={"3939/tcp": 3939},  # equivalent to `-p 3939:3939`
-        mounts=[
-            # equivalent to --mount type=bind,ro,src=./rstudio-connect.lic,dst=/var/lib/rstudio-connect/rstudio-connect.lic \
+    mounts = [
+        docker.types.services.Mount(
+            type="bind",
+            read_only=True,
+            source=f"{os.getcwd()}/rstudio-connect.lic",
+            target="/var/lib/rstudio-connect/rstudio-connect.lic",
+        ),
+    ]
+    
+    if args.config:
+        mounts.append(
             docker.types.services.Mount(
                 type="bind",
                 read_only=True,
-                source=f"{os.getcwd()}/rstudio-connect.lic",
-                target="/var/lib/rstudio-connect/rstudio-connect.lic",
-            ),
-            # equivalent to --mount type=bind,ro,src=./rstudio-connect.gcfg,dst=/etc/rstudio-connect/rstudio-connect.gcfg \
-            # docker.types.services.Mount(
-            #     type="bind",
-            #     read_only=True,
-            #     source=f"{os.getcwd()}/rstudio-connect.gcfg",
-            #     target="/etc/rstudio-connect/rstudio-connect.gcfg",
-            # ),
-        ],
+                source=os.path.abspath(args.config),
+                target="/etc/rstudio-connect/rstudio-connect.gcfg",
+            )
+        )
+    
+    container = client.containers.run(
+        image=f"{IMAGE}:{tag}",
+        detach=True,
+        tty=True,
+        stdin_open=True,
+        privileged=True,
+        ports={"3939/tcp": 3939},
+        mounts=mounts,
         environment={
             # "CONNECT_TENSORFLOW_ENABLED": "false",
             "CONNECT_BOOTSTRAP_ENABLED": "true",
