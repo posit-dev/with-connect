@@ -93,6 +93,7 @@ def main():
     api_key = get_api_key(bootstrap_secret)
 
     # Execute user command if provided
+    exit_code = 0
     if args.command:
         try:
             env = {**os.environ, "CONNECT_API_KEY": api_key, "CONNECT_SERVER": "http://localhost:3939"}
@@ -102,8 +103,10 @@ def main():
                 print(f"Command stderr: {result.stderr}")
         except subprocess.CalledProcessError as e:
             print(f"Command failed with exit code {e.returncode}: {e.stderr}")
+            exit_code = e.returncode
 
     container.stop()
+    sys.exit(exit_code)
 
 def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
     """
