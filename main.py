@@ -31,11 +31,30 @@ def parse_args():
     return args
 
 
+def get_docker_tag(version: str) -> str:
+    parts = version.split('.')
+    if len(parts) < 2:
+        return version
+    
+    try:
+        year = int(parts[0])
+        month = int(parts[1])
+    except ValueError:
+        return version
+    
+    if year > 2023 or (year == 2023 and month > 6):
+        return f"jammy-{version}"
+    elif year > 2022 or (year == 2022 and month >= 9):
+        return f"bionic-{version}"
+    else:
+        return version
+
+
 def main():
     args = parse_args()
 
     client = docker.from_env()
-    tag = f"jammy-{args.version}"
+    tag = get_docker_tag(args.version)
 
     bootstrap_secret = base64.b64encode(os.urandom(32)).decode("utf-8")
 
