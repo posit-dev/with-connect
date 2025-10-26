@@ -156,21 +156,21 @@ def wait_for_http_server(
     container, timeout: float = 60.0, poll_interval: float = 2.0
 ) -> bool:
     """
-    Wait until the container logs contain the line:
-        'Starting HTTP server on [::]:3939'
+    Wait until the container logs contain the HTTP server start message.
+    Supports both newer format 'Starting HTTP server on [::]:3939'
+    and older format 'Starting HTTP server on :3939'
 
     :param container: docker.models.containers.Container instance
     :param timeout: Maximum seconds to wait (default 60)
     :param poll_interval: Seconds between log checks (default 2)
     :return: True if message found before timeout, False otherwise
     """
-    target = "Starting HTTP server on [::]:3939"
     deadline = time.time() + timeout
 
     while time.time() < deadline:
-        logs = container.logs().decode("utf-8", errors="ignore")
+        logs = container.logs().decode("utf-8", errors="replace")
 
-        if target in logs:
+        if "Starting HTTP server on" in logs and ":3939" in logs:
             return True
         time.sleep(poll_interval)
     return False
