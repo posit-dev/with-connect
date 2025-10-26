@@ -105,11 +105,15 @@ def main():
 
     print("Waiting for port 3939 to open...")
     if not is_port_open("localhost", 3939, timeout=60.0):
+        print("\nContainer logs:")
+        print(container.logs().decode("utf-8", errors="replace"))
         container.stop()
         raise RuntimeError("Posit Connect did not start within 60 seconds.")
 
     print("Waiting for HTTP server to start...")
     if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
+        print("\nContainer logs:")
+        print(container.logs().decode("utf-8", errors="replace"))
         container.stop()
         raise RuntimeError("Posit Connect did not log HTTP server start within 60 seconds.")
 
