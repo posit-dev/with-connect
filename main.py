@@ -67,8 +67,7 @@ def main():
         image = client.images.pull(IMAGE, tag=tag)
         print(f"Successfully pulled {image.short_id}")
     except Exception as e:
-        print(f"Failed to pull image: {e}")
-        return
+        raise RuntimeError(f"Failed to pull image: {e}")
 
     mounts = [
         docker.types.services.Mount(
@@ -106,15 +105,13 @@ def main():
 
     print("Waiting for port 3939 to open...")
     if not is_port_open("localhost", 3939, timeout=60.0):
-        print("Posit Connect did not start within 60 seconds.")
         container.stop()
-        return
+        raise RuntimeError("Posit Connect did not start within 60 seconds.")
 
     print("Waiting for HTTP server to start...")
     if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
-        print("Posit Connect did not log HTTP server start within 60 seconds.")
         container.stop()
-        return
+        raise RuntimeError("Posit Connect did not log HTTP server start within 60 seconds.")
 
     api_key = get_api_key(bootstrap_secret)
 
