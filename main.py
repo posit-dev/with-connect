@@ -117,7 +117,7 @@ def main():
         container.stop()
         raise RuntimeError("Posit Connect did not log HTTP server start within 60 seconds.")
 
-    api_key = get_api_key(bootstrap_secret)
+    api_key = get_api_key(bootstrap_secret, container)
 
     # Execute user command if provided
     exit_code = 0
@@ -175,7 +175,7 @@ def wait_for_http_server(
         time.sleep(poll_interval)
     return False
 
-def get_api_key(bootstrap_secret: str) -> str:
+def get_api_key(bootstrap_secret: str, container) -> str:
     try:
         result = subprocess.run(
             [
@@ -193,6 +193,8 @@ def get_api_key(bootstrap_secret: str) -> str:
         )
         api_key = result.stdout.strip()
         if not api_key:
+            print("\nContainer logs:")
+            print(container.logs().decode("utf-8", errors="replace"))
             raise RuntimeError("Bootstrap command succeeded but returned empty API key")
         return api_key
     except subprocess.CalledProcessError as e:
