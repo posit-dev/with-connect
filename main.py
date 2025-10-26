@@ -176,22 +176,27 @@ def wait_for_http_server(
     return False
 
 def get_api_key(bootstrap_secret: str) -> str:
-    result = subprocess.run(
-        [
-            "rsconnect",
-            "bootstrap",
-            "-i",
-            "-s",
-            "http://localhost:3939",
-            "--raw",
-        ],
-        check=True,
-        text=True,
-        env={**os.environ, "CONNECT_BOOTSTRAP_SECRETKEY": bootstrap_secret},
-        capture_output=True,
-    )
-
-    return result.stdout.strip()
+    try:
+        result = subprocess.run(
+            [
+                "rsconnect",
+                "bootstrap",
+                "-i",
+                "-s",
+                "http://localhost:3939",
+                "--raw",
+            ],
+            check=True,
+            text=True,
+            env={**os.environ, "CONNECT_BOOTSTRAP_SECRETKEY": bootstrap_secret},
+            capture_output=True,
+        )
+        api_key = result.stdout.strip()
+        if not api_key:
+            raise RuntimeError("Bootstrap command succeeded but returned empty API key")
+        return api_key
+    except subprocess.CalledProcessError as e:
+        raise RuntimeError(f"Failed to bootstrap Connect and retrieve API key: {e.stderr}")
 
 
 if __name__ == "__main__":
