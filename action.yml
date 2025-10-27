@@ -1,10 +1,10 @@
 name: 'Deploy to Posit Connect'
 description: 'Deploy content to Posit Connect using with-connect'
 inputs:
-  connect-license:
+  license:
     description: 'Posit Connect license key'
     required: true
-  connect-version:
+  version:
     description: 'Posit Connect version to use'
     required: false
     default: '2025.09.0'
@@ -30,12 +30,12 @@ runs:
 
     - name: Create license file
       shell: bash
-      run: echo "${{ inputs.connect-license }}" > rstudio-connect.lic
+      run: echo "${{ inputs.license }}" > rstudio-connect.lic
 
     - name: Run command
       shell: bash
       run: |
-        ARGS="--version ${{ inputs.connect-version }}"
+        ARGS="--version ${{ inputs.version }}"
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config-file }}"
         fi

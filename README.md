@@ -82,8 +82,8 @@ jobs:
       - name: Test deployment
         uses: nealrichardson/with-connect@dev
         with:
-          connect-version: 2025.09.0
-          connect-license: ${{ secrets.CONNECT_LICENSE_FILE }}
+          version: 2025.09.0
+          license: ${{ secrets.CONNECT_LICENSE_FILE }}
           command: rsconnect deploy manifest .
 ```
 
