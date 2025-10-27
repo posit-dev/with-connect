@@ -9,22 +9,39 @@ import time
 import docker
 
 
-
 IMAGE = "rstudio/rstudio-connect"
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run Posit Connect with optional command execution")
-    parser.add_argument("--version", default="2025.09.0", help="Posit Connect version (default: 2025.09.0)")
-    parser.add_argument("--license", default="./rstudio-connect.lic", help="Path to RStudio Connect license file (default: ./rstudio-connect.lic)")
-    parser.add_argument("--config", help="Path to rstudio-connect.gcfg configuration file")
-    parser.add_argument("-e", "--env", action="append", dest="env_vars", help="Environment variables to pass to command (format: KEY=VALUE)")
+    parser = argparse.ArgumentParser(
+        description="Run Posit Connect with optional command execution"
+    )
+    parser.add_argument(
+        "--version",
+        default="2025.09.0",
+        help="Posit Connect version (default: 2025.09.0)",
+    )
+    parser.add_argument(
+        "--license",
+        default="./rstudio-connect.lic",
+        help="Path to Posit Connect license file (default: ./rstudio-connect.lic)",
+    )
+    parser.add_argument(
+        "--config", help="Path to rstudio-connect.gcfg configuration file"
+    )
+    parser.add_argument(
+        "-e",
+        "--env",
+        action="append",
+        dest="env_vars",
+        help="Environment variables to pass to command (format: KEY=VALUE)",
+    )
 
     # Handle -- separator and capture remaining args
     if "--" in sys.argv:
         separator_index = sys.argv.index("--")
         main_args = sys.argv[1:separator_index]
-        command_args = sys.argv[separator_index + 1:]
+        command_args = sys.argv[separator_index + 1 :]
     else:
         main_args = sys.argv[1:]
         command_args = []
@@ -35,16 +52,16 @@ def parse_args():
 
 
 def get_docker_tag(version: str) -> str:
-    parts = version.split('.')
+    parts = version.split(".")
     if len(parts) < 2:
         return version
-    
+
     try:
         year = int(parts[0])
         month = int(parts[1])
     except ValueError:
         return version
-    
+
     if year > 2023 or (year == 2023 and month > 6):
         return f"jammy-{version}"
     elif year > 2022 or (year == 2022 and month >= 9):
@@ -77,7 +94,7 @@ def main():
             target="/var/lib/rstudio-connect/rstudio-connect.lic",
         ),
     ]
-    
+
     if args.config:
         mounts.append(
             docker.types.services.Mount(
@@ -87,7 +104,7 @@ def main():
                 target="/etc/rstudio-connect/rstudio-connect.gcfg",
             )
         )
-    
+
     container = client.containers.run(
         image=f"{IMAGE}:{tag}",
         detach=True,
@@ -115,7 +132,9 @@ def main():
         print("\nContainer logs:")
         print(container.logs().decode("utf-8", errors="replace"))
         container.stop()
-        raise RuntimeError("Posit Connect did not log HTTP server start within 60 seconds.")
+        raise RuntimeError(
+            "Posit Connect did not log HTTP server start within 60 seconds."
+        )
 
     api_key = get_api_key(bootstrap_secret, container)
 
@@ -123,7 +142,11 @@ def main():
     exit_code = 0
     if args.command:
         try:
-            env = {**os.environ, "CONNECT_API_KEY": api_key, "CONNECT_SERVER": "http://localhost:3939"}
+            env = {
+                **os.environ,
+                "CONNECT_API_KEY": api_key,
+                "CONNECT_SERVER": "http://localhost:3939",
+            }
             if args.env_vars:
                 for env_var in args.env_vars:
                     if "=" in env_var:
@@ -136,6 +159,7 @@ def main():
 
     container.stop()
     sys.exit(exit_code)
+
 
 def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
     """
@@ -151,6 +175,7 @@ def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
             return True
     except (socket.timeout, ConnectionRefusedError, OSError):
         return False
+
 
 def wait_for_http_server(
     container, timeout: float = 60.0, poll_interval: float = 2.0
@@ -175,6 +200,7 @@ def wait_for_http_server(
         time.sleep(poll_interval)
     return False
 
+
 def get_api_key(bootstrap_secret: str, container) -> str:
     try:
         result = subprocess.run(
@@ -198,7 +224,9 @@ def get_api_key(bootstrap_secret: str, container) -> str:
             raise RuntimeError("Bootstrap command succeeded but returned empty API key")
         return api_key
     except subprocess.CalledProcessError as e:
-        raise RuntimeError(f"Failed to bootstrap Connect and retrieve API key: {e.stderr}")
+        raise RuntimeError(
+            f"Failed to bootstrap Connect and retrieve API key: {e.stderr}"
+        )
 
 
 if __name__ == "__main__":
