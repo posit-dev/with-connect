@@ -14,9 +14,6 @@ inputs:
   command:
     description: 'Command to run against Connect'
     required: true
-  env:
-    description: 'Environment variables to pass to command (YAML object)'
-    required: false
 
 runs:
   using: composite
@@ -35,17 +32,11 @@ runs:
       shell: bash
       run: echo "${{ inputs.connect-license }}" > rstudio-connect.lic
 
-    - name: Deploy to Connect
+    - name: Run command
       shell: bash
       run: |
         ARGS="--version ${{ inputs.connect-version }}"
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config-file }}"
-        fi
-        if [ -n "${{ inputs.env }}" ]; then
-          for key in $(echo '${{ inputs.env }}' | jq -r 'keys[]'); do
-            value=$(echo '${{ inputs.env }}' | jq -r --arg k "$key" '.[$k]')
-            ARGS="$ARGS -e ${key}=${value}"
-          done
         fi
         with-connect $ARGS -- ${{ inputs.command }}

@@ -23,7 +23,6 @@ uv pip install -e .
 - Python 3.13+
 - Docker
 - A valid Posit Connect license file
-- [rsconnect-python](https://docs.posit.co/rsconnect-python/) CLI
 
 ## Usage
 
@@ -66,7 +65,7 @@ with-connect --version 2024.08.0 --license /path/to/license.lic -- rsconnect dep
 
 ## GitHub Actions
 
-Example workflow for deploying to Posit Connect in CI:
+This project contains a GitHub Action for use in CI/CD workflows.
 
 ```yaml
 name: Deploy to Connect
@@ -78,25 +77,14 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+
+      - name: Test deployment
+        uses: nealrichardson/with-connect@dev
         with:
-          python-version: '3.13'
-      
-      - name: Install dependencies
-        run: |
-          pip install uv
-          uv pip install git+https://github.com/tdstein/with-connect.git
-          uv pip install rsconnect-python
-      
-      - name: Create license file
-        run: echo "${{ secrets.CONNECT_LICENSE }}" > rstudio-connect.lic
-      
-      - name: Deploy to Connect
-        run: |
-          with-connect -- rsconnect deploy manifest .
+          connect-version: 2025.09.0
+          connect-license: ${{ secrets.CONNECT_LICENSE_FILE }}
+          command: rsconnect deploy manifest .
 ```
 
 ## Minimum Version
