@@ -25,6 +25,10 @@ runs:
     - name: Set up uv
       uses: astral-sh/setup-uv@v7
 
+    - name: Install with-connect
+      shell: bash
+      run: uv tool install ${{ github.action_path }}
+
     - name: Create license file
       shell: bash
       run: echo "${{ inputs.license }}" > rstudio-connect.lic
@@ -39,4 +43,4 @@ runs:
         if [ "${{ inputs.quiet }}" = "true" ]; then
           ARGS="$ARGS --quiet"
         fi
-        uv run --directory ${{ github.action_path }} with-connect $ARGS -- ${{ inputs.command }}
+        with-connect $ARGS -- ${{ inputs.command }}
