@@ -13,6 +13,17 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker images
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-docker-${{ hashFiles('action.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-
+
       - name: Test with-connect action
         uses: ./
         with:
@@ -25,6 +36,17 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker images
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-docker-${{ hashFiles('action.yml') }}
+          restore-keys: |
+            ${{ runner.os }}-docker-
 
       - name: Set up uv
         uses: astral-sh/setup-uv@v7
