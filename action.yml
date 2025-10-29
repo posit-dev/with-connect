@@ -24,13 +24,6 @@ runs:
   steps:
     - name: Set up uv
       uses: astral-sh/setup-uv@v7
-      with:
-        activate-environment: true
-        working-directory: ${{ github.action_path }}
-
-    - name: Install with-connect
-      shell: bash
-      run: uv pip install ${{ github.action_path }}
 
     - name: Create license file
       shell: bash
@@ -46,4 +39,4 @@ runs:
         if [ "${{ inputs.quiet }}" = "true" ]; then
           ARGS="$ARGS --quiet"
         fi
-        with-connect $ARGS -- ${{ inputs.command }}
+        uv run --directory ${{ github.action_path }} with-connect $ARGS -- ${{ inputs.command }}
