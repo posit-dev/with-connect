@@ -8,7 +8,7 @@ import time
 
 import docker
 from rsconnect.api import RSConnectClient, RSConnectServer
-from rsconnect.models import TokenGenerator
+from rsconnect.json_web_token import TokenGenerator
 
 
 IMAGE = "rstudio/rstudio-connect"
