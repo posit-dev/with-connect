@@ -79,9 +79,10 @@ def main():
     bootstrap_secret = base64.b64encode(os.urandom(32)).decode("utf-8")
 
     # Ensure image is pulled from Docker Hub
+    # Set platform to linux/amd64 for ARM compatibility (no ARM images available yet)
     print(f"Pulling image {IMAGE}:{tag}...")
     try:
-        image = client.images.pull(IMAGE, tag=tag)
+        image = client.images.pull(IMAGE, tag=tag, platform="linux/amd64")
         print(f"Successfully pulled {image.short_id}")
     except Exception as e:
         raise RuntimeError(f"Failed to pull image: {e}")
@@ -90,7 +91,7 @@ def main():
         docker.types.services.Mount(
             type="bind",
             read_only=True,
-            source=f"{os.getcwd()}/rstudio-connect.lic",
+            source=os.path.abspath(os.path.expanduser(args.license)),
             target="/var/lib/rstudio-connect/rstudio-connect.lic",
         ),
     ]
@@ -100,7 +101,7 @@ def main():
             docker.types.services.Mount(
                 type="bind",
                 read_only=True,
-                source=os.path.abspath(args.config),
+                source=os.path.abspath(os.path.expanduser(args.config)),
                 target="/etc/rstudio-connect/rstudio-connect.gcfg",
             )
         )
@@ -113,6 +114,7 @@ def main():
         privileged=True,
         ports={"3939/tcp": 3939},
         mounts=mounts,
+        platform="linux/amd64",
         environment={
             # "CONNECT_TENSORFLOW_ENABLED": "false",
             "CONNECT_BOOTSTRAP_ENABLED": "true",
