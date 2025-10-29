@@ -151,45 +151,45 @@ def main():
         },
     )
 
-    print("Waiting for port 3939 to open...")
-    if not is_port_open("localhost", 3939, timeout=60.0):
-        print("\nContainer logs:")
-        print(container.logs().decode("utf-8", errors="replace"))
+    try:
+        print("Waiting for port 3939 to open...")
+        if not is_port_open("localhost", 3939, timeout=60.0):
+            print("\nContainer logs:")
+            print(container.logs().decode("utf-8", errors="replace"))
+            raise RuntimeError("Posit Connect did not start within 60 seconds.")
+
+        print("Waiting for HTTP server to start...")
+        if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
+            print("\nContainer logs:")
+            print(container.logs().decode("utf-8", errors="replace"))
+            raise RuntimeError(
+                "Posit Connect did not log HTTP server start within 60 seconds."
+            )
+
+        api_key = get_api_key(bootstrap_secret, container)
+
+        # Execute user command if provided
+        exit_code = 0
+        if args.command:
+            try:
+                env = {
+                    **os.environ,
+                    "CONNECT_API_KEY": api_key,
+                    "CONNECT_SERVER": "http://localhost:3939",
+                }
+                if args.env_vars:
+                    for env_var in args.env_vars:
+                        if "=" in env_var:
+                            key, value = env_var.split("=", 1)
+                            env[key] = value
+                result = subprocess.run(args.command, check=True, env=env)
+                exit_code = result.returncode
+            except subprocess.CalledProcessError as e:
+                exit_code = e.returncode
+
+        sys.exit(exit_code)
+    finally:
         container.stop()
-        raise RuntimeError("Posit Connect did not start within 60 seconds.")
-
-    print("Waiting for HTTP server to start...")
-    if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
-        print("\nContainer logs:")
-        print(container.logs().decode("utf-8", errors="replace"))
-        container.stop()
-        raise RuntimeError(
-            "Posit Connect did not log HTTP server start within 60 seconds."
-        )
-
-    api_key = get_api_key(bootstrap_secret, container)
-
-    # Execute user command if provided
-    exit_code = 0
-    if args.command:
-        try:
-            env = {
-                **os.environ,
-                "CONNECT_API_KEY": api_key,
-                "CONNECT_SERVER": "http://localhost:3939",
-            }
-            if args.env_vars:
-                for env_var in args.env_vars:
-                    if "=" in env_var:
-                        key, value = env_var.split("=", 1)
-                        env[key] = value
-            result = subprocess.run(args.command, check=True, env=env)
-            exit_code = result.returncode
-        except subprocess.CalledProcessError as e:
-            exit_code = e.returncode
-
-    container.stop()
-    sys.exit(exit_code)
 
 
 def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
