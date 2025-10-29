@@ -36,6 +36,11 @@ def parse_args():
         dest="env_vars",
         help="Environment variables to pass to command (format: KEY=VALUE)",
     )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Suppress progress indicators during image pull",
+    )
 
     # Handle -- separator and capture remaining args
     if "--" in sys.argv:
@@ -80,10 +85,34 @@ def main():
 
     # Ensure image is pulled from Docker Hub
     # Set platform to linux/amd64 for ARM compatibility (no ARM images available yet)
-    print(f"Pulling image {IMAGE}:{tag}...")
+    if args.quiet:
+        print(f"Pulling image {IMAGE}:{tag}...")
+    else:
+        # Set end="" to avoid newline, flush=True to ensure immediate output
+        print(f"Pulling image {IMAGE}:{tag}...", end="", flush=True)
+
     try:
-        image = client.images.pull(IMAGE, tag=tag, platform="linux/amd64")
-        print(f"Successfully pulled {image.short_id}")
+        # Use low-level API to stream pull progress
+        pull_stream = client.api.pull(
+            IMAGE, tag=tag, platform="linux/amd64", stream=True, decode=True
+        )
+
+        # Print dots periodically to show progress without verbose output
+        dot_count = 0
+        for chunk in pull_stream:
+            if "status" in chunk:
+                # Print a dot every few chunks to show activity
+                dot_count += 1
+                if dot_count % 10 == 0:
+                    if not args.quiet:
+                        print(".", end="", flush=True)
+
+        if not args.quiet:
+            print()  # Newline after dots
+
+        # Get the pulled image to confirm success
+        client.images.get(f"{IMAGE}:{tag}")
+        print(f"Successfully pulled {IMAGE}:{tag}")
     except Exception as e:
         raise RuntimeError(f"Failed to pull image: {e}")
 

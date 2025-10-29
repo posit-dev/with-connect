@@ -11,6 +11,10 @@ inputs:
   config-file:
     description: 'Path to optional rstudio-connect.gcfg configuration file'
     required: false
+  quiet:
+    description: 'Suppress progress indicators during image pull'
+    required: false
+    default: 'false'
   command:
     description: 'Command to run against Connect'
     required: true
@@ -38,5 +42,8 @@ runs:
         ARGS="--version ${{ inputs.version }}"
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config-file }}"
+        fi
+        if [ "${{ inputs.quiet }}" = "true" ]; then
+          ARGS="$ARGS --quiet"
         fi
         with-connect $ARGS -- ${{ inputs.command }}
