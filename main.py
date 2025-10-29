@@ -14,9 +14,10 @@ IMAGE = "rstudio/rstudio-connect"
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run RStudio Connect with optional command execution")
+    parser = argparse.ArgumentParser(description="Run Posit Connect with optional command execution")
     parser.add_argument("--version", default="2025.09.0", help="RStudio Connect version (default: 2025.09.0)")
     parser.add_argument("--config", help="Path to rstudio-connect.gcfg configuration file")
+    parser.add_argument("--license", default="./rstudio-connect.lic", help="Path to Posit Connect license file (default: ./rstudio-connect.lic)")
 
     # Handle -- separator and capture remaining args
     if "--" in sys.argv:
@@ -32,11 +33,30 @@ def parse_args():
     return args
 
 
+def get_docker_tag(version: str) -> str:
+    parts = version.split('.')
+    if len(parts) < 2:
+        return version
+    
+    try:
+        year = int(parts[0])
+        month = int(parts[1])
+    except ValueError:
+        return version
+    
+    if year > 2023 or (year == 2023 and month > 6):
+        return f"jammy-{version}"
+    elif year > 2022 or (year == 2022 and month >= 9):
+        return f"bionic-{version}"
+    else:
+        return version
+
+
 def main():
     args = parse_args()
 
     client = docker.from_env()
-    tag = f"jammy-{args.version}"
+    tag = get_docker_tag(args.version)
 
     bootstrap_secret = base64.b64encode(os.urandom(32)).decode("utf-8")
 
@@ -85,13 +105,13 @@ def main():
 
     print("Waiting for port 3939 to open...")
     if not is_port_open("localhost", 3939, timeout=60.0):
-        print("RStudio Connect did not start within 60 seconds.")
+        print("Posit Connect did not start within 60 seconds.")
         container.stop()
         return
 
     print("Waiting for HTTP server to start...")
     if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
-        print("RStudio Connect did not log HTTP server start within 60 seconds.")
+        print("Posit Connect did not log HTTP server start within 60 seconds.")
         container.stop()
         return
 
