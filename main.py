@@ -15,7 +15,8 @@ IMAGE = "rstudio/rstudio-connect"
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run Posit Connect with optional command execution")
-    parser.add_argument("--version", default="2025.09.0", help="Posit Connect version (default: 2025.09.0)")
+    parser.add_argument("--version", default="2025.09.0", help="RStudio Connect version (default: 2025.09.0)")
+    parser.add_argument("--license", default="./rstudio-connect.lic", help="Path to RStudio Connect license file (default: ./rstudio-connect.lic)")
 
     # Handle -- separator and capture remaining args
     if "--" in sys.argv:
@@ -60,7 +61,7 @@ def main():
             docker.types.services.Mount(
                 type="bind",
                 read_only=True,
-                source=f"{os.getcwd()}/rstudio-connect.lic",
+                source=os.path.abspath(args.license),
                 target="/var/lib/rstudio-connect/rstudio-connect.lic",
             ),
             # equivalent to --mount type=bind,ro,src=./rstudio-connect.gcfg,dst=/etc/rstudio-connect/rstudio-connect.gcfg \
