@@ -1,0 +1,42 @@
+name: 'Deploy to Posit Connect'
+description: 'Deploy content to Posit Connect using with-connect'
+inputs:
+  license:
+    description: 'Posit Connect license key'
+    required: true
+  version:
+    description: 'Posit Connect version to use'
+    required: false
+    default: '2025.09.0'
+  config-file:
+    description: 'Path to optional rstudio-connect.gcfg configuration file'
+    required: false
+  command:
+    description: 'Command to run against Connect'
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v7
+      with:
+        activate-environment: true
+        working-directory: ${{ github.action_path }}
+
+    - name: Install with-connect
+      shell: bash
+      run: uv pip install ${{ github.action_path }}
+
+    - name: Create license file
+      shell: bash
+      run: echo "${{ inputs.license }}" > rstudio-connect.lic
+
+    - name: Run command
+      shell: bash
+      run: |
+        ARGS="--version ${{ inputs.version }}"
+        if [ -n "${{ inputs.config-file }}" ]; then
+          ARGS="$ARGS --config ${{ inputs.config-file }}"
+        fi
+        with-connect $ARGS -- ${{ inputs.command }}

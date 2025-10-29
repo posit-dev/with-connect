@@ -7,13 +7,13 @@ A CLI tool for running Posit Connect in Docker and executing commands against it
 Install using `uv`:
 
 ```bash
-uv pip install git+https://github.com/tdstein/with-connect.git
+uv pip install git+https://github.com/posit-dev/with-connect.git
 ```
 
 Or install from a local clone:
 
 ```bash
-git clone https://github.com/tdstein/with-connect.git
+git clone https://github.com/posit-dev/with-connect.git
 cd with-connect
 uv pip install -e .
 ```
@@ -23,7 +23,6 @@ uv pip install -e .
 - Python 3.13+
 - Docker
 - A valid Posit Connect license file
-- [rsconnect-python](https://docs.posit.co/rsconnect-python/) CLI
 
 ## Usage
 
@@ -66,10 +65,12 @@ with-connect --version 2024.08.0 --license /path/to/license.lic -- rsconnect dep
 
 ## GitHub Actions
 
-Example workflow for deploying to Posit Connect in CI:
+This project contains a GitHub Action for use in CI/CD workflows. Use the `@v1` tag to get the latest stable version, or `@main` for the development version.
+
+You will need to store your Posit Connect license file as a GitHub secret (e.g., `CONNECT_LICENSE_FILE`).
 
 ```yaml
-name: Deploy to Connect
+name: Integration tests with Connect
 on:
   push:
     branches: [main]
@@ -78,27 +79,16 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+
+      - name: Test deployment
+        uses: posit-dev/with-connect@v1
         with:
-          python-version: '3.13'
-      
-      - name: Install dependencies
-        run: |
-          pip install uv
-          uv pip install git+https://github.com/tdstein/with-connect.git
-          uv pip install rsconnect-python
-      
-      - name: Create license file
-        run: echo "${{ secrets.CONNECT_LICENSE }}" > rstudio-connect.lic
-      
-      - name: Deploy to Connect
-        run: |
-          with-connect -- rsconnect deploy manifest .
+          version: 2025.09.0
+          license: ${{ secrets.CONNECT_LICENSE_FILE }}
+          command: rsconnect deploy manifest .
 ```
 
 ## Minimum Version
 
-Posit Connect 2022.10.0 or later is required (when the bootstrap endpoint was added).
+Posit Connect 2022.10.0 or later is required. Earlier versions did not have the bootstrap endpoint used in this utility.
