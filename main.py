@@ -237,7 +237,9 @@ def wait_for_http_server(
 def get_api_key(bootstrap_secret: str, container) -> str:
     try:
         # Generate bootstrap token from secret
-        token_gen = TokenGenerator(bootstrap_secret)
+        # The bootstrap_secret we received is base64-encoded, need to decode it
+        secret_bytes = base64.b64decode(bootstrap_secret.encode("utf-8"))
+        token_gen = TokenGenerator(secret_bytes)
         bootstrap_token = token_gen.bootstrap()
         
         # Create server connection with bootstrap JWT
