@@ -1,6 +1,6 @@
 # with-connect
 
-A CLI tool for running Posit Connect in Docker and executing commands against it.
+A CLI tool and GitHub Action for running Posit Connect in Docker and executing commands against it.
 
 ## Installation
 
