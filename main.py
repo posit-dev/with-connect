@@ -7,6 +7,8 @@ import sys
 import time
 
 import docker
+from rsconnect.api import RSConnectClient, RSConnectServer
+from rsconnect.models import TokenGenerator
 
 
 IMAGE = "rstudio/rstudio-connect"
@@ -234,30 +236,33 @@ def wait_for_http_server(
 
 def get_api_key(bootstrap_secret: str, container) -> str:
     try:
-        result = subprocess.run(
-            [
-                "rsconnect",
-                "bootstrap",
-                "-i",
-                "-s",
-                "http://localhost:3939",
-                "--raw",
-            ],
-            check=True,
-            text=True,
-            env={**os.environ, "CONNECT_BOOTSTRAP_SECRETKEY": bootstrap_secret},
-            capture_output=True,
-        )
-        api_key = result.stdout.strip()
-        if not api_key:
+        # Generate bootstrap token from secret
+        token_gen = TokenGenerator(bootstrap_secret)
+        bootstrap_token = token_gen.bootstrap()
+        
+        # Create server connection with bootstrap JWT
+        server = RSConnectServer("http://localhost:3939", None, bootstrap_jwt=bootstrap_token)
+        client = RSConnectClient(server)
+        
+        # Call bootstrap endpoint
+        response = client.bootstrap()
+        
+        # Extract API key from response
+        if response and "api_key" in response:
+            api_key = response["api_key"]
+            if not api_key:
+                print("\nContainer logs:")
+                print(container.logs().decode("utf-8", errors="replace"))
+                raise RuntimeError("Bootstrap succeeded but returned empty API key")
+            return api_key
+        else:
             print("\nContainer logs:")
             print(container.logs().decode("utf-8", errors="replace"))
-            raise RuntimeError("Bootstrap command succeeded but returned empty API key")
-        return api_key
-    except subprocess.CalledProcessError as e:
-        raise RuntimeError(
-            f"Failed to bootstrap Connect and retrieve API key: {e.stderr}"
-        )
+            raise RuntimeError(f"Bootstrap returned unexpected response: {response}")
+    except Exception as e:
+        print("\nContainer logs:")
+        print(container.logs().decode("utf-8", errors="replace"))
+        raise RuntimeError(f"Failed to bootstrap Connect and retrieve API key: {e}")
 
 
 if __name__ == "__main__":
