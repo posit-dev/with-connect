@@ -14,7 +14,7 @@ IMAGE = "rstudio/rstudio-connect"
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="Run RStudio Connect with optional command execution")
+    parser = argparse.ArgumentParser(description="Run Posit Connect with optional command execution")
     parser.add_argument("--version", default="2025.09.0", help="RStudio Connect version (default: 2025.09.0)")
     parser.add_argument("--license", default="./rstudio-connect.lic", help="Path to RStudio Connect license file (default: ./rstudio-connect.lic)")
 
@@ -81,13 +81,13 @@ def main():
 
     print("Waiting for port 3939 to open...")
     if not is_port_open("localhost", 3939, timeout=60.0):
-        print("RStudio Connect did not start within 60 seconds.")
+        print("Posit Connect did not start within 60 seconds.")
         container.stop()
         return
 
     print("Waiting for HTTP server to start...")
     if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
-        print("RStudio Connect did not log HTTP server start within 60 seconds.")
+        print("Posit Connect did not log HTTP server start within 60 seconds.")
         container.stop()
         return
 
