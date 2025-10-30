@@ -4,18 +4,18 @@ A CLI tool and GitHub Action for running Posit Connect in Docker and executing c
 
 ## Installation
 
-Install using `uv`:
+Install as a tool using `uv` (recommended):
 
 ```bash
-uv pip install git+https://github.com/posit-dev/with-connect.git
+uv tool install git+https://github.com/posit-dev/with-connect.git
 ```
 
-Or install from a local clone:
+Or install from a local clone for development:
 
 ```bash
 git clone https://github.com/posit-dev/with-connect.git
 cd with-connect
-uv pip install -e .
+uv tool install -e .
 ```
 
 ## Requirements

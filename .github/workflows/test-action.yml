@@ -1,0 +1,41 @@
+name: Test Action
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Test with-connect action
+        uses: ./
+        with:
+          version: 2024.08.0
+          license: ${{ secrets.CONNECT_LICENSE }}
+          command: |
+            bash -c 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
+
+  test-cli:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Create license file
+        run: echo "${{ secrets.CONNECT_LICENSE }}" > rstudio-connect.lic
+
+      - name: Install with-connect
+        run: uv tool install .
+
+      - name: Test with-connect CLI
+        run: |
+          with-connect --version 2024.08.0 -- \
+            bash -c 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
