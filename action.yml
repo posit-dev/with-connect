@@ -15,6 +15,10 @@ inputs:
     description: 'Suppress progress indicators during image pull'
     required: false
     default: 'false'
+  port:
+    description: 'Port to map the Connect container to'
+    required: false
+    default: '3939'
   command:
     description: 'Command to run against Connect'
     required: true
@@ -36,7 +40,7 @@ runs:
     - name: Run command
       shell: bash
       run: |
-        ARGS="--version ${{ inputs.version }}"
+        ARGS="--version ${{ inputs.version }} --port ${{ inputs.port }}"
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config-file }}"
         fi
