@@ -61,6 +61,10 @@ def parse_args():
 
 def get_docker_tag(version: str) -> str:
     if version in ("latest", "release"):
+        # For the rstudio/rstudio-connect image, "jammy" is currently used
+        # for the latest stable release. "latest" never gets updated and points
+        # to 2022.08.0, which, aside from being misleading, also does not
+        # have the bootstrap endpoint that this utility relies on.
         return "jammy"
 
     parts = version.split(".")
