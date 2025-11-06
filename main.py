@@ -171,7 +171,7 @@ def get_docker_tag(version: str) -> str:
         return version
 
 
-def main():
+def main() -> int:
     """
     Main entry point for the with-connect CLI tool.
     
@@ -188,14 +188,12 @@ def main():
 
     license_path = os.path.abspath(os.path.expanduser(args.license))
     if not os.path.exists(license_path):
-        print(f"Error: License file does not exist: {license_path}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"License file does not exist: {license_path}")
 
     if args.config:
         config_path = os.path.abspath(os.path.expanduser(args.config))
         if not os.path.exists(config_path):
-            print(f"Error: Config file does not exist: {config_path}", file=sys.stderr)
-            sys.exit(1)
+            raise RuntimeError(f"Config file does not exist: {config_path}")
 
     client = docker.from_env()
     tag = get_docker_tag(args.version)
@@ -242,45 +240,45 @@ def main():
 
     server_url = f"http://localhost:{args.port}"
 
-    print(f"Waiting for port {args.port} to open...")
-    if not is_port_open("localhost", args.port, timeout=60.0):
-        print("\nContainer logs:")
-        print(container.logs().decode("utf-8", errors="replace"))
+    try:
+        print(f"Waiting for port {args.port} to open...")
+        if not is_port_open("localhost", args.port, timeout=60.0):
+            print("\nContainer logs:")
+            print(container.logs().decode("utf-8", errors="replace"))
+            raise RuntimeError("Posit Connect did not start within 60 seconds.")
+
+        print("Waiting for HTTP server to start...")
+        if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
+            print("\nContainer logs:")
+            print(container.logs().decode("utf-8", errors="replace"))
+            raise RuntimeError(
+                "Posit Connect did not log HTTP server start within 60 seconds."
+            )
+
+        api_key = get_api_key(bootstrap_secret, container, server_url)
+
+        # Execute user command if provided
+        exit_code = 0
+        if args.command:
+            try:
+                env = {
+                    **os.environ,
+                    "CONNECT_API_KEY": api_key,
+                    "CONNECT_SERVER": server_url,
+                }
+                if args.env_vars:
+                    for env_var in args.env_vars:
+                        if "=" in env_var:
+                            key, value = env_var.split("=", 1)
+                            env[key] = value
+                result = subprocess.run(args.command, check=True, env=env)
+                exit_code = result.returncode
+            except subprocess.CalledProcessError as e:
+                exit_code = e.returncode
+
+        return exit_code
+    finally:
         container.stop()
-        raise RuntimeError("Posit Connect did not start within 60 seconds.")
-
-    print("Waiting for HTTP server to start...")
-    if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
-        print("\nContainer logs:")
-        print(container.logs().decode("utf-8", errors="replace"))
-        container.stop()
-        raise RuntimeError(
-            "Posit Connect did not log HTTP server start within 60 seconds."
-        )
-
-    api_key = get_api_key(bootstrap_secret, container, server_url)
-
-    # Execute user command if provided
-    exit_code = 0
-    if args.command:
-        try:
-            env = {
-                **os.environ,
-                "CONNECT_API_KEY": api_key,
-                "CONNECT_SERVER": server_url,
-            }
-            if args.env_vars:
-                for env_var in args.env_vars:
-                    if "=" in env_var:
-                        key, value = env_var.split("=", 1)
-                        env[key] = value
-            result = subprocess.run(args.command, check=True, env=env)
-            exit_code = result.returncode
-        except subprocess.CalledProcessError as e:
-            exit_code = e.returncode
-
-    container.stop()
-    sys.exit(exit_code)
 
 
 def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
@@ -391,4 +389,8 @@ def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        sys.exit(main())
+    except RuntimeError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
