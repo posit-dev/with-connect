@@ -188,14 +188,12 @@ def main() -> int:
 
     license_path = os.path.abspath(os.path.expanduser(args.license))
     if not os.path.exists(license_path):
-        print(f"Error: License file does not exist: {license_path}", file=sys.stderr)
-        sys.exit(1)
+        raise RuntimeError(f"License file does not exist: {license_path}")
 
     if args.config:
         config_path = os.path.abspath(os.path.expanduser(args.config))
         if not os.path.exists(config_path):
-            print(f"Error: Config file does not exist: {config_path}", file=sys.stderr)
-            sys.exit(1)
+            raise RuntimeError(f"Config file does not exist: {config_path}")
 
     client = docker.from_env()
     tag = get_docker_tag(args.version)
