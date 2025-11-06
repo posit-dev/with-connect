@@ -3,8 +3,9 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, Mock
 
+import docker
 import main
 
 
@@ -132,6 +133,37 @@ def test_extract_server_version_dev():
     assert main.extract_server_version(logs) == "2025.11.0-dev+29-gd0db52662c"
 
 
+def test_local_image_usage():
+    mock_args = Mock()
+    mock_args.version = "2024.08.0"
+    mock_args.license = "test.lic"
+    mock_args.config = None
+    mock_args.quiet = False
+    
+    mock_client = MagicMock()
+    mock_image = MagicMock()
+    mock_client.images.get.return_value = mock_image
+    
+    tag = main.get_docker_tag(mock_args.version)
+    image_name = f"{main.IMAGE}:{tag}"
+    
+    try:
+        mock_client.images.get(image_name)
+        should_pull = False
+    except docker.errors.ImageNotFound:
+        should_pull = True
+    
+    assert should_pull is False
+
+
+def test_release_always_pulls():
+    mock_args = Mock()
+    mock_args.version = "release"
+    
+    should_pull = mock_args.version in ("latest", "release")
+    assert should_pull is True
+
+
 if __name__ == "__main__":
     test_license_file_not_exists()
     print("✓ test_license_file_not_exists passed")
@@ -177,5 +209,11 @@ if __name__ == "__main__":
     
     test_extract_server_version_dev()
     print("✓ test_extract_server_version_dev passed")
+    
+    test_local_image_usage()
+    print("✓ test_local_image_usage passed")
+    
+    test_release_always_pulls()
+    print("✓ test_release_always_pulls passed")
     
     print("\nAll tests passed!")

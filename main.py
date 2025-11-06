@@ -16,6 +16,12 @@ IMAGE = "rstudio/rstudio-connect"
 
 
 def parse_args():
+    """
+    Parse command line arguments.
+    
+    Handles the special -- separator to distinguish between tool arguments
+    and the command to run against Connect.
+    """
     parser = argparse.ArgumentParser(
         description="Run Posit Connect with optional command execution"
     )
@@ -59,7 +65,81 @@ def parse_args():
     return args
 
 
+def has_local_image(client, image_name: str) -> bool:
+    """
+    Check if a Docker image exists in the local cache.
+    
+    Used to avoid unnecessary pulls when the image is already available locally.
+    """
+    try:
+        client.images.get(image_name)
+        return True
+    except docker.errors.ImageNotFound:
+        return False
+
+
+def pull_image(client, image_name: str, tag: str, quiet: bool) -> None:
+    """
+    Pull a Docker image from the registry.
+    
+    Displays progress indicators (dots) unless quiet mode is enabled.
+    Always pulls for linux/amd64 platform for ARM compatibility.
+    """
+    if quiet:
+        print(f"Pulling image {image_name}...")
+    else:
+        print(f"Pulling image {image_name}...", end="", flush=True)
+
+    pull_stream = client.api.pull(
+        IMAGE, tag=tag, platform="linux/amd64", stream=True, decode=True
+    )
+
+    dot_count = 0
+    for chunk in pull_stream:
+        if "status" in chunk:
+            dot_count += 1
+            if dot_count % 10 == 0 and not quiet:
+                print(".", end="", flush=True)
+
+    if not quiet:
+        print()
+
+    print(f"Successfully pulled {image_name}")
+
+
+def ensure_image(client, image_name: str, tag: str, version: str, quiet: bool) -> None:
+    """
+    Ensure the required Docker image is available.
+    
+    Strategy:
+    - For 'latest'/'release': always pull to get the newest version
+    - For specific versions: use local cache if available
+    - If pull fails: fall back to local cache if it exists
+    - This allows offline usage with cached images
+    """
+    is_release = version in ("latest", "release")
+    
+    if not is_release and has_local_image(client, image_name):
+        print(f"Using locally cached image {image_name}")
+        return
+    
+    try:
+        pull_image(client, image_name, tag, quiet)
+    except Exception as e:
+        if has_local_image(client, image_name):
+            print(f"Pull failed, but using locally cached image {image_name}")
+        else:
+            raise RuntimeError(f"Failed to pull image and no local copy available: {e}")
+
+
 def get_docker_tag(version: str) -> str:
+    """
+    Convert a version string to the appropriate Docker tag.
+    
+    Maps semantic versions to the correct base image tag based on when
+    Connect switched from bionic (Ubuntu 18.04) to jammy (Ubuntu 22.04).
+    Also maps 'latest'/'release' to 'jammy' since 'latest' is unmaintained.
+    """
     if version in ("latest", "release"):
         # For the rstudio/rstudio-connect image, "jammy" is currently used
         # for the latest stable release. "latest" never gets updated and points
@@ -86,6 +166,18 @@ def get_docker_tag(version: str) -> str:
 
 
 def main():
+    """
+    Main entry point for the with-connect CLI tool.
+    
+    Orchestrates the full workflow:
+    1. Parse arguments and validate file paths
+    2. Ensure Docker image is available
+    3. Start Connect container with license and optional config
+    4. Wait for Connect to start and validate license
+    5. Bootstrap and retrieve API key
+    6. Execute user command with CONNECT_API_KEY and CONNECT_SERVER set
+    7. Stop container and exit with command's exit code
+    """
     args = parse_args()
 
     license_path = os.path.abspath(os.path.expanduser(args.license))
@@ -101,41 +193,11 @@ def main():
 
     client = docker.from_env()
     tag = get_docker_tag(args.version)
+    image_name = f"{IMAGE}:{tag}"
 
     bootstrap_secret = base64.b64encode(os.urandom(32)).decode("utf-8")
 
-    # Ensure image is pulled from Docker Hub
-    # Set platform to linux/amd64 for ARM compatibility (no ARM images available yet)
-    if args.quiet:
-        print(f"Pulling image {IMAGE}:{tag}...")
-    else:
-        # Set end="" to avoid newline, flush=True to ensure immediate output
-        print(f"Pulling image {IMAGE}:{tag}...", end="", flush=True)
-
-    try:
-        # Use low-level API to stream pull progress
-        pull_stream = client.api.pull(
-            IMAGE, tag=tag, platform="linux/amd64", stream=True, decode=True
-        )
-
-        # Print dots periodically to show progress without verbose output
-        dot_count = 0
-        for chunk in pull_stream:
-            if "status" in chunk:
-                # Print a dot every few chunks to show activity
-                dot_count += 1
-                if dot_count % 10 == 0:
-                    if not args.quiet:
-                        print(".", end="", flush=True)
-
-        if not args.quiet:
-            print()  # Newline after dots
-
-        # Get the pulled image to confirm success
-        client.images.get(f"{IMAGE}:{tag}")
-        print(f"Successfully pulled {IMAGE}:{tag}")
-    except Exception as e:
-        raise RuntimeError(f"Failed to pull image: {e}")
+    ensure_image(client, image_name, tag, args.version, args.quiet)
 
     mounts = [
         docker.types.services.Mount(
@@ -157,7 +219,7 @@ def main():
         )
 
     container = client.containers.run(
-        image=f"{IMAGE}:{tag}",
+        image=image_name,
         detach=True,
         tty=True,
         stdin_open=True,
@@ -230,6 +292,13 @@ def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
 
 
 def extract_server_version(logs: str) -> str | None:
+    """
+    Extract the Posit Connect version from container logs.
+    
+    Looks for the startup message like 'Starting Posit Connect v2025.09.0'
+    and supports dev versions like 'v2025.11.0-dev+29-gd0db52662c'.
+    Returns None if version string not found.
+    """
     match = re.search(r"Starting Posit Connect v([\d.]+[\w\-+.]*)", logs)
     if match:
         return match.group(1)
@@ -274,6 +343,13 @@ def wait_for_http_server(
 
 
 def get_api_key(bootstrap_secret: str, container) -> str:
+    """
+    Bootstrap Connect and retrieve an API key.
+    
+    Uses Connect's bootstrap endpoint with a JWT generated from the bootstrap
+    secret to create and retrieve an API key. This key is used to authenticate
+    commands run against the Connect instance. Requires Connect 2022.10.0+.
+    """
     try:
         # Generate bootstrap token from secret
         # The bootstrap_secret we received is base64-encoded, need to decode it
