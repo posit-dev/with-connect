@@ -239,6 +239,12 @@ def wait_for_http_server(
     while time.time() < deadline:
         logs = container.logs().decode("utf-8", errors="replace")
 
+        if "Unable to obtain a valid license" in logs:
+            print("\nContainer logs:")
+            print(logs)
+            container.stop()
+            raise RuntimeError("Unable to obtain a valid license. Your Posit Connect license may be expired or invalid. Please check your license file.")
+
         if "Starting HTTP server on" in logs and ":3939" in logs:
             return True
         time.sleep(poll_interval)
