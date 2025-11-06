@@ -111,6 +111,27 @@ def test_get_docker_tag_invalid_format():
     assert main.get_docker_tag("custom-tag") == "custom-tag"
 
 
+def test_extract_server_version():
+    logs = 'time="2025-11-06T13:05:18.626Z" level=info msg="Starting Posit Connect v2025.09.0"'
+    assert main.extract_server_version(logs) == "2025.09.0"
+
+
+def test_extract_server_version_multiple_lines():
+    logs = '''time="2025-11-06T13:05:18.626Z" level=info msg="Starting Posit Connect v2024.08.0"
+time="2025-11-06T13:05:18.790Z" level=info msg="Starting HTTP server on [::]:3939"'''
+    assert main.extract_server_version(logs) == "2024.08.0"
+
+
+def test_extract_server_version_not_found():
+    logs = 'time="2025-11-06T13:05:18.626Z" level=info msg="Some other message"'
+    assert main.extract_server_version(logs) is None
+
+
+def test_extract_server_version_dev():
+    logs = 'time="2025-11-06T13:05:18.626Z" level=info msg="Starting Posit Connect v2025.11.0-dev+29-gd0db52662c"'
+    assert main.extract_server_version(logs) == "2025.11.0-dev+29-gd0db52662c"
+
+
 if __name__ == "__main__":
     test_license_file_not_exists()
     print("✓ test_license_file_not_exists passed")
@@ -144,5 +165,17 @@ if __name__ == "__main__":
     
     test_get_docker_tag_invalid_format()
     print("✓ test_get_docker_tag_invalid_format passed")
+    
+    test_extract_server_version()
+    print("✓ test_extract_server_version passed")
+    
+    test_extract_server_version_multiple_lines()
+    print("✓ test_extract_server_version_multiple_lines passed")
+    
+    test_extract_server_version_not_found()
+    print("✓ test_extract_server_version_not_found passed")
+    
+    test_extract_server_version_dev()
+    print("✓ test_extract_server_version_dev passed")
     
     print("\nAll tests passed!")

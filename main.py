@@ -1,6 +1,7 @@
 import argparse
 import base64
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -20,8 +21,8 @@ def parse_args():
     )
     parser.add_argument(
         "--version",
-        default="2025.09.0",
-        help="Posit Connect version (default: 2025.09.0)",
+        default="release",
+        help="Posit Connect version (default: release, the latest stable release)",
     )
     parser.add_argument(
         "--license",
@@ -61,7 +62,7 @@ def parse_args():
 def get_docker_tag(version: str) -> str:
     if version in ("latest", "release"):
         return "jammy"
-    
+
     parts = version.split(".")
     if len(parts) < 2:
         return version
@@ -224,6 +225,13 @@ def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
         return False
 
 
+def extract_server_version(logs: str) -> str | None:
+    match = re.search(r"Starting Posit Connect v([\d.]+[\w\-+.]*)", logs)
+    if match:
+        return match.group(1)
+    return None
+
+
 def wait_for_http_server(
     container, timeout: float = 60.0, poll_interval: float = 2.0
 ) -> bool:
@@ -238,15 +246,22 @@ def wait_for_http_server(
     :return: True if message found before timeout, False otherwise
     """
     deadline = time.time() + timeout
+    version = None
 
     while time.time() < deadline:
         logs = container.logs().decode("utf-8", errors="replace")
+        if not version:
+            version = extract_server_version(logs)
+            if version:
+                print(f"Running Posit Connect v{version}")
 
         if "Unable to obtain a valid license" in logs:
             print("\nContainer logs:")
             print(logs)
             container.stop()
-            raise RuntimeError("Unable to obtain a valid license. Your Posit Connect license may be expired or invalid. Please check your license file.")
+            raise RuntimeError(
+                "Unable to obtain a valid license. Your Posit Connect license may be expired or invalid. Please check your license file."
+            )
 
         if "Starting HTTP server on" in logs and ":3939" in logs:
             return True
@@ -261,14 +276,16 @@ def get_api_key(bootstrap_secret: str, container) -> str:
         secret_bytes = base64.b64decode(bootstrap_secret.encode("utf-8"))
         token_gen = TokenGenerator(secret_bytes)
         bootstrap_token = token_gen.bootstrap()
-        
+
         # Create server connection with bootstrap JWT
-        server = RSConnectServer("http://localhost:3939", None, bootstrap_jwt=bootstrap_token)
+        server = RSConnectServer(
+            "http://localhost:3939", None, bootstrap_jwt=bootstrap_token
+        )
         client = RSConnectClient(server)
-        
+
         # Call bootstrap endpoint
         response = client.bootstrap()
-        
+
         # Extract API key from response
         if response and "api_key" in response:
             api_key = response["api_key"]

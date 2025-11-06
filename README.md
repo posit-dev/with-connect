@@ -53,7 +53,7 @@ Commands after `--` are executed with `CONNECT_API_KEY` and `CONNECT_SERVER` env
 
 ### Options
 
-- `--version`: Specify the Connect version (default: 2025.09.0)
+- `--version`: Specify the Connect version (default: release). Use "latest" or "release" for the most recent version, or specify a version like "2024.08.0"
 - `--license`: Path to license file (default: ./rstudio-connect.lic)
 - `--config`: Path to optional rstudio-connect.gcfg configuration file
 
