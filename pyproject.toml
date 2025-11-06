@@ -11,3 +11,6 @@ dependencies = [
 
 [project.scripts]
 with-connect = "main:main"
+
+[tool.setuptools]
+py-modules = ["main"]

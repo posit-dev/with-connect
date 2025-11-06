@@ -8,6 +8,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  test-unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Install dependencies
+        run: uv sync --locked --all-extras --dev
+
+      - name: Run unit tests
+        run: uv run test_main.py
+
   test-action:
     runs-on: ubuntu-latest
     steps:

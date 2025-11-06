@@ -80,6 +80,17 @@ def get_docker_tag(version: str) -> str:
 def main():
     args = parse_args()
 
+    license_path = os.path.abspath(os.path.expanduser(args.license))
+    if not os.path.exists(license_path):
+        print(f"Error: License file does not exist: {license_path}", file=sys.stderr)
+        sys.exit(1)
+
+    if args.config:
+        config_path = os.path.abspath(os.path.expanduser(args.config))
+        if not os.path.exists(config_path):
+            print(f"Error: Config file does not exist: {config_path}", file=sys.stderr)
+            sys.exit(1)
+
     client = docker.from_env()
     tag = get_docker_tag(args.version)
 
@@ -122,7 +133,7 @@ def main():
         docker.types.services.Mount(
             type="bind",
             read_only=True,
-            source=os.path.abspath(os.path.expanduser(args.license)),
+            source=license_path,
             target="/var/lib/rstudio-connect/rstudio-connect.lic",
         ),
     ]
@@ -132,7 +143,7 @@ def main():
             docker.types.services.Mount(
                 type="bind",
                 read_only=True,
-                source=os.path.abspath(os.path.expanduser(args.config)),
+                source=config_path,
                 target="/etc/rstudio-connect/rstudio-connect.gcfg",
             )
         )
