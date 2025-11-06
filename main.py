@@ -59,6 +59,9 @@ def parse_args():
 
 
 def get_docker_tag(version: str) -> str:
+    if version in ("latest", "release"):
+        return "jammy"
+    
     parts = version.split(".")
     if len(parts) < 2:
         return version
