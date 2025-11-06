@@ -62,6 +62,7 @@ with-connect -- bash -c 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNE
 - `--version`: Specify the Connect version (default: release). Use "latest" or "release" for the most recent version, or specify a version like "2024.08.0", or a known docker tag.
 - `--license`: Path to license file (default: ./rstudio-connect.lic). This file must exist and be a valid Connect license.
 - `--config`: Path to optional rstudio-connect.gcfg configuration file
+- `--port`: Port to map the Connect container to (default: 3939). Allows running multiple Connect instances simultaneously.
 
 Example:
 

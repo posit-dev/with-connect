@@ -50,6 +50,12 @@ def parse_args():
         action="store_true",
         help="Suppress progress indicators during image pull",
     )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=3939,
+        help="Port to map the Connect container to (default: 3939)",
+    )
 
     # Handle -- separator and capture remaining args
     if "--" in sys.argv:
@@ -224,7 +230,7 @@ def main():
         tty=True,
         stdin_open=True,
         privileged=True,
-        ports={"3939/tcp": 3939},
+        ports={"3939/tcp": args.port},
         mounts=mounts,
         platform="linux/amd64",
         environment={
@@ -234,8 +240,10 @@ def main():
         },
     )
 
-    print("Waiting for port 3939 to open...")
-    if not is_port_open("localhost", 3939, timeout=60.0):
+    server_url = f"http://localhost:{args.port}"
+
+    print(f"Waiting for port {args.port} to open...")
+    if not is_port_open("localhost", args.port, timeout=60.0):
         print("\nContainer logs:")
         print(container.logs().decode("utf-8", errors="replace"))
         container.stop()
@@ -250,7 +258,7 @@ def main():
             "Posit Connect did not log HTTP server start within 60 seconds."
         )
 
-    api_key = get_api_key(bootstrap_secret, container)
+    api_key = get_api_key(bootstrap_secret, container, server_url)
 
     # Execute user command if provided
     exit_code = 0
@@ -259,7 +267,7 @@ def main():
             env = {
                 **os.environ,
                 "CONNECT_API_KEY": api_key,
-                "CONNECT_SERVER": "http://localhost:3939",
+                "CONNECT_SERVER": server_url,
             }
             if args.env_vars:
                 for env_var in args.env_vars:
@@ -342,7 +350,7 @@ def wait_for_http_server(
     return False
 
 
-def get_api_key(bootstrap_secret: str, container) -> str:
+def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
     """
     Bootstrap Connect and retrieve an API key.
     
@@ -358,9 +366,7 @@ def get_api_key(bootstrap_secret: str, container) -> str:
         bootstrap_token = token_gen.bootstrap()
 
         # Create server connection with bootstrap JWT
-        server = RSConnectServer(
-            "http://localhost:3939", None, bootstrap_jwt=bootstrap_token
-        )
+        server = RSConnectServer(server_url, None, bootstrap_jwt=bootstrap_token)
         client = RSConnectClient(server)
 
         # Call bootstrap endpoint
