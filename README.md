@@ -20,7 +20,7 @@ uv tool install -e .
 
 ## Requirements
 
-- Python 3.13+
+- Python 3.13+, or `uv`
 - Docker
 - A valid Posit Connect license file
 
@@ -51,10 +51,16 @@ with-connect -- rsconnect deploy manifest .
 
 Commands after `--` are executed with `CONNECT_API_KEY` and `CONNECT_SERVER` environment variables set.
 
+If you need to run a more complex command, like with multiple commands, or if you need to reference `CONNECT_API_KEY` and `CONNECT_SERVER` in the command, you can use `bash -c` and single quotes:
+
+```bash
+with-connect -- bash -c 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
+```
+
 ### Options
 
-- `--version`: Specify the Connect version (default: 2025.09.0)
-- `--license`: Path to license file (default: ./rstudio-connect.lic)
+- `--version`: Specify the Connect version (default: release). Use "latest" or "release" for the most recent version, or specify a version like "2024.08.0", or a known docker tag.
+- `--license`: Path to license file (default: ./rstudio-connect.lic). This file must exist and be a valid Connect license.
 - `--config`: Path to optional rstudio-connect.gcfg configuration file
 
 Example:
