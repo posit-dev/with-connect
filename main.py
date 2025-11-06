@@ -171,7 +171,7 @@ def get_docker_tag(version: str) -> str:
         return version
 
 
-def main():
+def main() -> int:
     """
     Main entry point for the with-connect CLI tool.
     
