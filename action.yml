@@ -19,6 +19,9 @@ inputs:
     description: 'Port to map the Connect container to'
     required: false
     default: '3939'
+  env:
+    description: 'Environment variables to pass to Docker container (one per line, format: KEY=VALUE)'
+    required: false
   command:
     description: 'Command to run against Connect'
     required: true
@@ -46,5 +49,12 @@ runs:
         fi
         if [ "${{ inputs.quiet }}" = "true" ]; then
           ARGS="$ARGS --quiet"
+        fi
+        if [ -n "${{ inputs.env }}" ]; then
+          while IFS= read -r line; do
+            if [ -n "$line" ]; then
+              ARGS="$ARGS -e $line"
+            fi
+          done <<< "${{ inputs.env }}"
         fi
         with-connect $ARGS -- ${{ inputs.command }}

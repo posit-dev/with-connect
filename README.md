@@ -63,12 +63,23 @@ with-connect -- bash -c 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNE
 - `--license`: Path to license file (default: ./rstudio-connect.lic). This file must exist and be a valid Connect license.
 - `--config`: Path to optional rstudio-connect.gcfg configuration file
 - `--port`: Port to map the Connect container to (default: 3939). Allows running multiple Connect instances simultaneously.
+- `-e`, `--env`: Environment variables to pass to the Docker container (format: KEY=VALUE). Can be specified multiple times.
 
 Example:
 
 ```bash
 with-connect --version 2024.08.0 --license /path/to/license.lic -- rsconnect deploy manifest .
 ```
+
+Passing environment variables to the Docker container:
+
+```bash
+with-connect -e MY_VAR=value -e ANOTHER_VAR=123 -- rsconnect deploy manifest .
+```
+
+You can use this to override Connect server configuration by passing in `CONNECT_` prefixed variables, following https://docs.posit.co/connect/admin/appendix/configuration/#environment-variables.
+
+If you need env vars that are useful for the command running after `--`, just set them in the environment from which you call `with-connect`: the command will inherit that environment.
 
 ## GitHub Actions
 
@@ -94,6 +105,32 @@ jobs:
           version: 2025.09.0
           license: ${{ secrets.CONNECT_LICENSE_FILE }}
           command: rsconnect deploy manifest .
+```
+
+### GitHub Action Options
+
+The GitHub Action supports the following inputs:
+
+- `license` (required): Posit Connect license key (store as a GitHub secret)
+- `version` (optional): Posit Connect version (default: release)
+- `config-file` (optional): Path to rstudio-connect.gcfg configuration file
+- `port` (optional): Port to map the Connect container to (default: 3939)
+- `quiet` (optional): Suppress progress indicators during image pull (default: false)
+- `env` (optional): Environment variables to pass to Docker container (one per line, format: KEY=VALUE)
+- `command` (required): Command to run against Connect
+
+Example with environment variables:
+
+```yaml
+- name: Test deployment with custom env vars
+  uses: posit-dev/with-connect@v1
+  with:
+    version: 2025.09.0
+    license: ${{ secrets.CONNECT_LICENSE_FILE }}
+    env: |
+      MY_VAR=value
+      ANOTHER_VAR=123
+    command: rsconnect deploy manifest .
 ```
 
 ## Minimum Version
