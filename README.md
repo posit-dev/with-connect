@@ -78,6 +78,9 @@ with-connect -e MY_VAR=value -e ANOTHER_VAR=123 -- rsconnect deploy manifest .
 ```
 
 You can use this to override Connect server configuration by passing in `CONNECT_` prefixed variables, following https://docs.posit.co/connect/admin/appendix/configuration/#environment-variables.
+
+If you need env vars that are useful for the command running after `--`, just set them in the environment from which you call `with-connect`: the command will inherit that environment.
+
 ## GitHub Actions
 
 This project contains a GitHub Action for use in CI/CD workflows. Use the `@v1` tag to get the latest stable version, or `@main` for the development version.
@@ -102,6 +105,32 @@ jobs:
           version: 2025.09.0
           license: ${{ secrets.CONNECT_LICENSE_FILE }}
           command: rsconnect deploy manifest .
+```
+
+### GitHub Action Options
+
+The GitHub Action supports the following inputs:
+
+- `license` (required): Posit Connect license key (store as a GitHub secret)
+- `version` (optional): Posit Connect version (default: release)
+- `config-file` (optional): Path to rstudio-connect.gcfg configuration file
+- `port` (optional): Port to map the Connect container to (default: 3939)
+- `quiet` (optional): Suppress progress indicators during image pull (default: false)
+- `env` (optional): Environment variables to pass to Docker container (one per line, format: KEY=VALUE)
+- `command` (required): Command to run against Connect
+
+Example with environment variables:
+
+```yaml
+- name: Test deployment with custom env vars
+  uses: posit-dev/with-connect@v1
+  with:
+    version: 2025.09.0
+    license: ${{ secrets.CONNECT_LICENSE_FILE }}
+    env: |
+      MY_VAR=value
+      ANOTHER_VAR=123
+    command: rsconnect deploy manifest .
 ```
 
 ## Minimum Version
