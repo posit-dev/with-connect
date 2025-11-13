@@ -43,7 +43,7 @@ def parse_args():
         "--env",
         action="append",
         dest="env_vars",
-        help="Environment variables to pass to command (format: KEY=VALUE)",
+        help="Environment variables to pass to Docker container (format: KEY=VALUE)",
     )
     parser.add_argument(
         "--quiet",
@@ -222,6 +222,18 @@ def main() -> int:
             )
         )
 
+    # Build container environment with bootstrap settings and user-provided env vars
+    container_env = {
+        # "CONNECT_TENSORFLOW_ENABLED": "false",
+        "CONNECT_BOOTSTRAP_ENABLED": "true",
+        "CONNECT_BOOTSTRAP_SECRETKEY": bootstrap_secret,
+    }
+    if args.env_vars:
+        for env_var in args.env_vars:
+            if "=" in env_var:
+                key, value = env_var.split("=", 1)
+                container_env[key] = value
+
     container = client.containers.run(
         image=image_name,
         detach=True,
@@ -231,11 +243,7 @@ def main() -> int:
         ports={"3939/tcp": args.port},
         mounts=mounts,
         platform="linux/amd64",
-        environment={
-            # "CONNECT_TENSORFLOW_ENABLED": "false",
-            "CONNECT_BOOTSTRAP_ENABLED": "true",
-            "CONNECT_BOOTSTRAP_SECRETKEY": bootstrap_secret,
-        },
+        environment=container_env,
     )
 
     server_url = f"http://localhost:{args.port}"
@@ -266,11 +274,6 @@ def main() -> int:
                     "CONNECT_API_KEY": api_key,
                     "CONNECT_SERVER": server_url,
                 }
-                if args.env_vars:
-                    for env_var in args.env_vars:
-                        if "=" in env_var:
-                            key, value = env_var.split("=", 1)
-                            env[key] = value
                 result = subprocess.run(args.command, check=True, env=env)
                 exit_code = result.returncode
             except subprocess.CalledProcessError as e:

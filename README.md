@@ -63,11 +63,18 @@ with-connect -- bash -c 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNE
 - `--license`: Path to license file (default: ./rstudio-connect.lic). This file must exist and be a valid Connect license.
 - `--config`: Path to optional rstudio-connect.gcfg configuration file
 - `--port`: Port to map the Connect container to (default: 3939). Allows running multiple Connect instances simultaneously.
+- `-e`, `--env`: Environment variables to pass to the Docker container (format: KEY=VALUE). Can be specified multiple times.
 
 Example:
 
 ```bash
 with-connect --version 2024.08.0 --license /path/to/license.lic -- rsconnect deploy manifest .
+```
+
+Passing environment variables to the Docker container:
+
+```bash
+with-connect -e MY_VAR=value -e ANOTHER_VAR=123 -- rsconnect deploy manifest .
 ```
 
 ## GitHub Actions
