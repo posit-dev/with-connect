@@ -77,6 +77,7 @@ Passing environment variables to the Docker container:
 with-connect -e MY_VAR=value -e ANOTHER_VAR=123 -- rsconnect deploy manifest .
 ```
 
+You can use this to override Connect server configuration by passing in `CONNECT_` prefixed variables, following https://docs.posit.co/connect/admin/appendix/configuration/#environment-variables.
 ## GitHub Actions
 
 This project contains a GitHub Action for use in CI/CD workflows. Use the `@v1` tag to get the latest stable version, or `@main` for the development version.
