@@ -29,13 +29,24 @@ jobs:
     steps:
       - uses: actions/checkout@v5
 
-      - name: Test with-connect action
+      - name: Test with-connect action (single line)
+        uses: ./
+        with:
+          version: 2024.08.0
+          license: ${{ secrets.CONNECT_LICENSE }}
+          # If this were not quoted in bash -c before running, $CONNECT_API_KEY
+          # would evaluate before with-connect defines it.
+          command: 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
+
+      - name: Test with-connect action (multiline)
         uses: ./
         with:
           version: 2024.08.0
           license: ${{ secrets.CONNECT_LICENSE }}
           command: |
-            bash -c 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
+            echo "Testing multiline command support"
+            curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content
+            echo "Multiline test passed"
 
   test-cli:
     runs-on: ubuntu-latest

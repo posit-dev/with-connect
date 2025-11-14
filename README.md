@@ -51,11 +51,13 @@ with-connect -- rsconnect deploy manifest .
 
 Commands after `--` are executed with `CONNECT_API_KEY` and `CONNECT_SERVER` environment variables set.
 
-If you need to run a more complex command, like with multiple commands, or if you need to reference `CONNECT_API_KEY` and `CONNECT_SERVER` in the command, you can use `bash -c` and single quotes:
+**Important:** When using the CLI, if you need to run multiple commands or reference the `CONNECT_API_KEY` and `CONNECT_SERVER` environment variables, you must wrap your command in `bash -c` with single quotes:
 
 ```bash
 with-connect -- bash -c 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
 ```
+
+Without `bash -c`, the environment variables would be evaluated before `with-connect` defines them.
 
 ### Options
 
@@ -105,6 +107,36 @@ jobs:
           version: 2025.09.0
           license: ${{ secrets.CONNECT_LICENSE_FILE }}
           command: rsconnect deploy manifest .
+```
+
+### Multiline Commands in GitHub Actions
+
+Unlike the CLI, the GitHub Action automatically wraps commands in `bash -c`, so you can write multiline commands naturally without explicit wrapping:
+
+```yaml
+- name: Run multiple commands
+  uses: posit-dev/with-connect@v1
+  with:
+    version: 2025.09.0
+    license: ${{ secrets.CONNECT_LICENSE_FILE }}
+    command: |
+      echo "Starting deployment"
+      rsconnect deploy manifest .
+      curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content
+      echo "Deployment complete"
+```
+
+The `$CONNECT_API_KEY` and `$CONNECT_SERVER` environment variables are available within your commands.
+
+**Note:** For single-line commands with special characters (like `$` or quotes), wrap the entire command in single quotes to prevent YAML parsing issues:
+
+```yaml
+- name: Single line with special characters
+  uses: posit-dev/with-connect@v1
+  with:
+    version: 2025.09.0
+    license: ${{ secrets.CONNECT_LICENSE_FILE }}
+    command: 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
 ```
 
 ### GitHub Action Options
