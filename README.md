@@ -128,6 +128,17 @@ Unlike the CLI, the GitHub Action automatically wraps commands in `bash -c`, so 
 
 The `$CONNECT_API_KEY` and `$CONNECT_SERVER` environment variables are available within your commands.
 
+**Note:** For single-line commands with special characters (like `$` or quotes), wrap the entire command in single quotes to prevent YAML parsing issues:
+
+```yaml
+- name: Single line with special characters
+  uses: posit-dev/with-connect@v1
+  with:
+    version: 2025.09.0
+    license: ${{ secrets.CONNECT_LICENSE_FILE }}
+    command: 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
+```
+
 ### GitHub Action Options
 
 The GitHub Action supports the following inputs:
