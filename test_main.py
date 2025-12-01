@@ -144,7 +144,7 @@ def test_local_image_usage():
     mock_client.images.get.return_value = mock_image
 
     tag = main.get_docker_tag(mock_args.version)
-    image_name = f"{main.IMAGE}:{tag}"
+    image_name = f"{main.DEFAULT_IMAGE}:{tag}"
 
     try:
         mock_client.images.get(image_name)
