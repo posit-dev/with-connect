@@ -12,7 +12,7 @@ from rsconnect.api import RSConnectClient, RSConnectServer
 from rsconnect.json_web_token import TokenGenerator
 
 
-IMAGE = "rstudio/rstudio-connect"
+DEFAULT_IMAGE = "rstudio/rstudio-connect"
 
 
 def parse_args():
@@ -24,6 +24,11 @@ def parse_args():
     """
     parser = argparse.ArgumentParser(
         description="Run Posit Connect with optional command execution"
+    )
+    parser.add_argument(
+        "--image",
+        default=DEFAULT_IMAGE,
+        help=f"Container image to use (default: {DEFAULT_IMAGE})",
     )
     parser.add_argument(
         "--version",
@@ -197,7 +202,7 @@ def main() -> int:
 
     client = docker.from_env()
     tag = get_docker_tag(args.version)
-    image_name = f"{IMAGE}:{tag}"
+    image_name = f"{args.image}:{tag}"
 
     bootstrap_secret = base64.b64encode(os.urandom(32)).decode("utf-8")
 
