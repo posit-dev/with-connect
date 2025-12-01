@@ -2,7 +2,7 @@ name: 'Deploy to Posit Connect'
 description: 'Deploy content to Posit Connect using with-connect'
 inputs:
   license:
-    description: 'Posit Connect license key'
+    description: 'Posit Connect license file contents'
     required: true
   version:
     description: 'Posit Connect version to use'
@@ -10,6 +10,9 @@ inputs:
     default: 'release'
   config-file:
     description: 'Path to optional rstudio-connect.gcfg configuration file'
+    required: false
+  image:
+    description: 'Container image to use for Posit Connect'
     required: false
   quiet:
     description: 'Suppress progress indicators during image pull'
@@ -46,6 +49,9 @@ runs:
         ARGS="--version ${{ inputs.version }} --port ${{ inputs.port }}"
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config-file }}"
+        fi
+        if [ -n "${{ inputs.image }}" ]; then
+          ARGS="$ARGS --image ${{ inputs.image }}"
         fi
         if [ "${{ inputs.quiet }}" = "true" ]; then
           ARGS="$ARGS --quiet"

@@ -186,6 +186,57 @@ def test_custom_port():
     assert "default: 3939" in result.stdout
 
 
+def test_image_and_version_exclusive():
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".lic", delete=False) as f:
+        license_file = f.name
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "main.py",
+                "--license",
+                license_file,
+                "--image",
+                "rstudio/rstudio-connect:jammy-2025.09.0",
+                "--version",
+                "2024.08.0",
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 1
+        assert "Cannot specify both --image and --version" in result.stderr
+    finally:
+        os.unlink(license_file)
+
+
+def test_image_without_tag():
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".lic", delete=False) as f:
+        license_file = f.name
+
+    try:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "main.py",
+                "--license",
+                license_file,
+                "--image",
+                "rstudio/rstudio-connect",
+            ],
+            capture_output=True,
+            text=True,
+        )
+
+        assert result.returncode == 1
+        assert "Invalid image format" in result.stderr
+        assert "Image must include a tag" in result.stderr
+    finally:
+        os.unlink(license_file)
+
+
 if __name__ == "__main__":
     test_license_file_not_exists()
     print("✓ test_license_file_not_exists passed")
@@ -201,6 +252,12 @@ if __name__ == "__main__":
 
     test_valid_license_http_server_starts()
     print("✓ test_valid_license_http_server_starts passed")
+
+    test_image_and_version_exclusive()
+    print("✓ test_image_and_version_exclusive passed")
+
+    test_image_without_tag()
+    print("✓ test_image_without_tag passed")
 
     test_get_docker_tag_latest()
     print("✓ test_get_docker_tag_latest passed")

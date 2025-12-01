@@ -13,12 +13,13 @@ from rsconnect.json_web_token import TokenGenerator
 
 
 IMAGE = "rstudio/rstudio-connect"
+VERSION = "release"
 
 
 def parse_args():
     """
     Parse command line arguments.
-    
+
     Handles the special -- separator to distinguish between tool arguments
     and the command to run against Connect.
     """
@@ -27,13 +28,17 @@ def parse_args():
     )
     parser.add_argument(
         "--version",
-        default="release",
-        help="Posit Connect version (default: release, the latest stable release)",
+        default=VERSION,
+        help=f"Posit Connect version (default: {VERSION}, the latest stable release)",
     )
     parser.add_argument(
         "--license",
         default="./rstudio-connect.lic",
         help="Path to Posit Connect license file (default: ./rstudio-connect.lic)",
+    )
+    parser.add_argument(
+        "--image",
+        help="Container image to use, including tag (overrides --version)",
     )
     parser.add_argument(
         "--config", help="Path to rstudio-connect.gcfg configuration file"
@@ -74,7 +79,7 @@ def parse_args():
 def has_local_image(client, image_name: str) -> bool:
     """
     Check if a Docker image exists in the local cache.
-    
+
     Used to avoid unnecessary pulls when the image is already available locally.
     """
     try:
@@ -185,7 +190,7 @@ def get_docker_tag(version: str) -> tuple[str, str]:
 def main() -> int:
     """
     Main entry point for the with-connect CLI tool.
-    
+
     Orchestrates the full workflow:
     1. Parse arguments and validate file paths
     2. Ensure Docker image is available
@@ -206,9 +211,22 @@ def main() -> int:
         if not os.path.exists(config_path):
             raise RuntimeError(f"Config file does not exist: {config_path}")
 
+    if args.image and args.version != VERSION:
+        raise RuntimeError("Cannot specify both --image and --version")
+
     client = docker.from_env()
-    base_image, tag = get_docker_tag(args.version)
-    image_name = f"{base_image}:{tag}"
+
+    if args.image:
+        try:
+            base_image, tag = args.image.rsplit(":", 1)
+        except ValueError:
+            raise RuntimeError(
+                f"Invalid image format: '{args.image}'. Image must include a tag (e.g., rstudio/rstudio-connect:2025.09.0)"
+            )
+        image_name = args.image
+    else:
+        base_image, tag = get_docker_tag(args.version)
+        image_name = f"{base_image}:{tag}"
 
     bootstrap_secret = base64.b64encode(os.urandom(32)).decode("utf-8")
 
@@ -314,7 +332,7 @@ def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
 def extract_server_version(logs: str) -> str | None:
     """
     Extract the Posit Connect version from container logs.
-    
+
     Looks for the startup message like 'Starting Posit Connect v2025.09.0'
     and supports dev versions like 'v2025.11.0-dev+29-gd0db52662c'.
     Returns None if version string not found.
@@ -365,7 +383,7 @@ def wait_for_http_server(
 def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
     """
     Bootstrap Connect and retrieve an API key.
-    
+
     Uses Connect's bootstrap endpoint with a JWT generated from the bootstrap
     secret to create and retrieve an API key. This key is used to authenticate
     commands run against the Connect instance. Requires Connect 2022.10.0+.
