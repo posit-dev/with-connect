@@ -84,20 +84,22 @@ def has_local_image(client, image_name: str) -> bool:
         return False
 
 
-def pull_image(client, image_name: str, tag: str, quiet: bool) -> None:
+def pull_image(client, base_image: str, tag: str, quiet: bool) -> None:
     """
     Pull a Docker image from the registry.
-    
+
     Displays progress indicators (dots) unless quiet mode is enabled.
     Always pulls for linux/amd64 platform for ARM compatibility.
     """
+    image_name = f"{base_image}:{tag}"
+
     if quiet:
         print(f"Pulling image {image_name}...")
     else:
         print(f"Pulling image {image_name}...", end="", flush=True)
 
     pull_stream = client.api.pull(
-        IMAGE, tag=tag, platform="linux/amd64", stream=True, decode=True
+        base_image, tag=tag, platform="linux/amd64", stream=True, decode=True
     )
 
     dot_count = 0
@@ -113,24 +115,25 @@ def pull_image(client, image_name: str, tag: str, quiet: bool) -> None:
     print(f"Successfully pulled {image_name}")
 
 
-def ensure_image(client, image_name: str, tag: str, version: str, quiet: bool) -> None:
+def ensure_image(client, base_image: str, tag: str, version: str, quiet: bool) -> None:
     """
     Ensure the required Docker image is available.
-    
+
     Strategy:
-    - For 'latest'/'release': always pull to get the newest version
+    - For 'latest'/'release'/'preview': always pull to get the newest version
     - For specific versions: use local cache if available
     - If pull fails: fall back to local cache if it exists
     - This allows offline usage with cached images
     """
-    is_release = version in ("latest", "release")
-    
+    image_name = f"{base_image}:{tag}"
+    is_release = version in ("latest", "release", "preview")
+
     if not is_release and has_local_image(client, image_name):
         print(f"Using locally cached image {image_name}")
         return
-    
+
     try:
-        pull_image(client, image_name, tag, quiet)
+        pull_image(client, base_image, tag, quiet)
     except Exception as e:
         if has_local_image(client, image_name):
             print(f"Pull failed, but using locally cached image {image_name}")
@@ -138,37 +141,45 @@ def ensure_image(client, image_name: str, tag: str, version: str, quiet: bool) -
             raise RuntimeError(f"Failed to pull image and no local copy available: {e}")
 
 
-def get_docker_tag(version: str) -> str:
+def get_docker_tag(version: str) -> tuple[str, str]:
     """
-    Convert a version string to the appropriate Docker tag.
-    
-    Maps semantic versions to the correct base image tag based on when
+    Convert a version string to the appropriate Docker image and tag.
+
+    Maps semantic versions to the correct base image and tag based on when
     Connect switched from bionic (Ubuntu 18.04) to jammy (Ubuntu 22.04).
     Also maps 'latest'/'release' to 'jammy' since 'latest' is unmaintained.
+    Maps 'preview' to the nightly build image.
+
+    Returns:
+        tuple[str, str]: (base_image, tag)
     """
+    if version == "preview":
+        # Map to nightly preview build
+        return ("rstudio/rstudio-connect-preview", "jammy-daily")
+
     if version in ("latest", "release"):
         # For the rstudio/rstudio-connect image, "jammy" is currently used
         # for the latest stable release. "latest" never gets updated and points
         # to 2022.08.0, which, aside from being misleading, also does not
         # have the bootstrap endpoint that this utility relies on.
-        return "jammy"
+        return (IMAGE, "jammy")
 
     parts = version.split(".")
     if len(parts) < 2:
-        return version
+        return (IMAGE, version)
 
     try:
         year = int(parts[0])
         month = int(parts[1])
     except ValueError:
-        return version
+        return (IMAGE, version)
 
     if year > 2023 or (year == 2023 and month > 6):
-        return f"jammy-{version}"
+        return (IMAGE, f"jammy-{version}")
     elif year > 2022 or (year == 2022 and month >= 9):
-        return f"bionic-{version}"
+        return (IMAGE, f"bionic-{version}")
     else:
-        return version
+        return (IMAGE, version)
 
 
 def main() -> int:
@@ -196,12 +207,12 @@ def main() -> int:
             raise RuntimeError(f"Config file does not exist: {config_path}")
 
     client = docker.from_env()
-    tag = get_docker_tag(args.version)
-    image_name = f"{IMAGE}:{tag}"
+    base_image, tag = get_docker_tag(args.version)
+    image_name = f"{base_image}:{tag}"
 
     bootstrap_secret = base64.b64encode(os.urandom(32)).decode("utf-8")
 
-    ensure_image(client, image_name, tag, args.version, args.quiet)
+    ensure_image(client, base_image, tag, args.version, args.quiet)
 
     mounts = [
         docker.types.services.Mount(
