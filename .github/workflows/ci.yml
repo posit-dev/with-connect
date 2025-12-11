@@ -38,7 +38,7 @@ jobs:
           # would evaluate before with-connect defines it.
           command: 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
 
-      - name: Test with-connect action (multiline)
+      - name: Test with-connect action (multiline, different quoting)
         uses: ./
         with:
           version: 2024.08.0
@@ -46,7 +46,7 @@ jobs:
           command: |
             echo "Testing multiline command support"
             curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content
-            echo "Multiline test passed"
+            echo 'Multiline test passed'
 
   test-cli:
     runs-on: ubuntu-latest

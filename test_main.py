@@ -82,33 +82,37 @@ def test_valid_license_http_server_starts():
 
 
 def test_get_docker_tag_latest():
-    assert main.get_docker_tag("latest") == "jammy"
+    assert main.get_docker_tag("latest") == ("rstudio/rstudio-connect", "jammy")
 
 
 def test_get_docker_tag_release():
-    assert main.get_docker_tag("release") == "jammy"
+    assert main.get_docker_tag("release") == ("rstudio/rstudio-connect", "jammy")
+
+
+def test_get_docker_tag_preview():
+    assert main.get_docker_tag("preview") == ("rstudio/rstudio-connect-preview", "jammy-daily")
 
 
 def test_get_docker_tag_jammy_version():
-    assert main.get_docker_tag("2025.09.0") == "jammy-2025.09.0"
-    assert main.get_docker_tag("2024.01.0") == "jammy-2024.01.0"
-    assert main.get_docker_tag("2023.07.0") == "jammy-2023.07.0"
+    assert main.get_docker_tag("2025.09.0") == ("rstudio/rstudio-connect", "jammy-2025.09.0")
+    assert main.get_docker_tag("2024.01.0") == ("rstudio/rstudio-connect", "jammy-2024.01.0")
+    assert main.get_docker_tag("2023.07.0") == ("rstudio/rstudio-connect", "jammy-2023.07.0")
 
 
 def test_get_docker_tag_bionic_version():
-    assert main.get_docker_tag("2023.06.0") == "bionic-2023.06.0"
-    assert main.get_docker_tag("2023.01.0") == "bionic-2023.01.0"
-    assert main.get_docker_tag("2022.09.0") == "bionic-2022.09.0"
+    assert main.get_docker_tag("2023.06.0") == ("rstudio/rstudio-connect", "bionic-2023.06.0")
+    assert main.get_docker_tag("2023.01.0") == ("rstudio/rstudio-connect", "bionic-2023.01.0")
+    assert main.get_docker_tag("2022.09.0") == ("rstudio/rstudio-connect", "bionic-2022.09.0")
 
 
 def test_get_docker_tag_old_version():
-    assert main.get_docker_tag("2022.08.0") == "2022.08.0"
-    assert main.get_docker_tag("2021.12.0") == "2021.12.0"
+    assert main.get_docker_tag("2022.08.0") == ("rstudio/rstudio-connect", "2022.08.0")
+    assert main.get_docker_tag("2021.12.0") == ("rstudio/rstudio-connect", "2021.12.0")
 
 
 def test_get_docker_tag_invalid_format():
-    assert main.get_docker_tag("jammy") == "jammy"
-    assert main.get_docker_tag("custom-tag") == "custom-tag"
+    assert main.get_docker_tag("jammy") == ("rstudio/rstudio-connect", "jammy")
+    assert main.get_docker_tag("custom-tag") == ("rstudio/rstudio-connect", "custom-tag")
 
 
 def test_extract_server_version():
@@ -143,8 +147,8 @@ def test_local_image_usage():
     mock_image = MagicMock()
     mock_client.images.get.return_value = mock_image
 
-    tag = main.get_docker_tag(mock_args.version)
-    image_name = f"{main.IMAGE}:{tag}"
+    base_image, tag = main.get_docker_tag(mock_args.version)
+    image_name = f"{base_image}:{tag}"
 
     try:
         mock_client.images.get(image_name)
@@ -159,7 +163,15 @@ def test_release_always_pulls():
     mock_args = Mock()
     mock_args.version = "release"
 
-    should_pull = mock_args.version in ("latest", "release")
+    should_pull = mock_args.version in ("latest", "release", "preview")
+    assert should_pull is True
+
+
+def test_preview_always_pulls():
+    mock_args = Mock()
+    mock_args.version = "preview"
+
+    should_pull = mock_args.version in ("latest", "release", "preview")
     assert should_pull is True
 
 
@@ -196,6 +208,9 @@ if __name__ == "__main__":
     test_get_docker_tag_release()
     print("✓ test_get_docker_tag_release passed")
 
+    test_get_docker_tag_preview()
+    print("✓ test_get_docker_tag_preview passed")
+
     test_get_docker_tag_jammy_version()
     print("✓ test_get_docker_tag_jammy_version passed")
 
@@ -225,6 +240,9 @@ if __name__ == "__main__":
 
     test_release_always_pulls()
     print("✓ test_release_always_pulls passed")
+
+    test_preview_always_pulls()
+    print("✓ test_preview_always_pulls passed")
 
     test_custom_port()
     print("✓ test_custom_port passed")
