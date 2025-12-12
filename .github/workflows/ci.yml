@@ -48,6 +48,7 @@ jobs:
             echo "Testing multiline command with various quote types"
             RESPONSE=$(curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content)
             # The response should be an empty JSON array since no content has been deployed
+            echo "Response: $RESPONSE"
             [ "RESPONSE" = "[]" ] || exit 1
             # Test that single quotes work in commands
             TEST_STRING='This contains single quotes'
@@ -76,6 +77,7 @@ jobs:
               set -euo pipefail
               RESPONSE=$(curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content)
               # The response should be an empty JSON array since no content has been deployed
+              echo "Response: $RESPONSE"
               [ "RESPONSE" = "[]" ] || exit 1
               echo "✓ CLI test passed - got valid JSON response"
             '
