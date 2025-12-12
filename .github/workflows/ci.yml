@@ -49,7 +49,7 @@ jobs:
             RESPONSE=$(curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content)
             # The response should be an empty JSON array since no content has been deployed
             echo "Response: $RESPONSE"
-            [ "RESPONSE" = "[]" ] || exit 1
+            [ "$RESPONSE" = "[]" ] || exit 1
             # Test that single quotes work in commands
             TEST_STRING='This contains single quotes'
             echo "TEST_STRING value: $TEST_STRING"
@@ -78,6 +78,6 @@ jobs:
               RESPONSE=$(curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content)
               # The response should be an empty JSON array since no content has been deployed
               echo "Response: $RESPONSE"
-              [ "RESPONSE" = "[]" ] || exit 1
+              [ "$RESPONSE" = "[]" ] || exit 1
               echo "✓ CLI test passed - got valid JSON response"
             '
