@@ -57,4 +57,6 @@ runs:
             fi
           done <<< "${{ inputs.env }}"
         fi
-        with-connect $ARGS -- bash -c "$1" _ "${{ inputs.command }}"
+        with-connect $ARGS -- bash <<'SCRIPT'
+        ${{ inputs.command }}
+        SCRIPT

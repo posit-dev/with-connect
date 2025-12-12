@@ -34,7 +34,7 @@ jobs:
         with:
           version: 2024.08.0
           license: ${{ secrets.CONNECT_LICENSE }}
-          # If this were not quoted in bash -c before running, $CONNECT_API_KEY
+          # If this were not quoted before running, $CONNECT_API_KEY
           # would evaluate before with-connect defines it.
           command: 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
 
@@ -44,9 +44,17 @@ jobs:
           version: 2024.08.0
           license: ${{ secrets.CONNECT_LICENSE }}
           command: |
-            echo "Testing multiline command support"
-            curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content
-            echo 'Multiline test passed'
+            set -euo pipefail
+            echo "Testing multiline command with various quote types"
+            RESPONSE=$(curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content)
+            # The response should be an empty JSON array since no content has been deployed
+            echo "Response: $RESPONSE"
+            [ "$RESPONSE" = "[]" ] || exit 1
+            # Test that single quotes work in commands
+            TEST_STRING='This contains single quotes'
+            echo "TEST_STRING value: $TEST_STRING"
+            [ "$TEST_STRING" = "This contains single quotes" ] || exit 1
+            echo "✓ Multiline test passed - variables, single quotes, and double quotes all work"
 
   test-cli:
     runs-on: ubuntu-latest
@@ -65,4 +73,11 @@ jobs:
       - name: Test with-connect CLI
         run: |
           with-connect --version 2024.08.0 -- \
-            bash -c 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
+            bash -c '
+              set -euo pipefail
+              RESPONSE=$(curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content)
+              # The response should be an empty JSON array since no content has been deployed
+              echo "Response: $RESPONSE"
+              [ "$RESPONSE" = "[]" ] || exit 1
+              echo "✓ CLI test passed - got valid JSON response"
+            '
