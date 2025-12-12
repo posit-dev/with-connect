@@ -75,6 +75,7 @@ jobs:
             bash -c '
               set -euo pipefail
               RESPONSE=$(curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content)
-              echo "$RESPONSE" | jq -e ".results" > /dev/null
+              # The response should be an empty JSON array since no content has been deployed
+              [ "RESPONSE" = "[]" ] || exit 1
               echo "✓ CLI test passed - got valid JSON response"
             '
