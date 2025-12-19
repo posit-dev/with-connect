@@ -61,11 +61,14 @@ Without `bash -c`, the environment variables would be evaluated before `with-con
 
 ### Options
 
-- `--version`: Specify the Connect version (default: release). Use "latest" or "release" for the most recent version, or specify a version like "2024.08.0", or a known docker tag.
-- `--license`: Path to license file (default: ./rstudio-connect.lic). This file must exist and be a valid Connect license.
-- `--config`: Path to optional rstudio-connect.gcfg configuration file
-- `--port`: Port to map the Connect container to (default: 3939). Allows running multiple Connect instances simultaneously.
-- `-e`, `--env`: Environment variables to pass to the Docker container (format: KEY=VALUE). Can be specified multiple times.
+| Option        | Default                 | Description                                                                                                          |
+|---------------|-------------------------|----------------------------------------------------------------------------------------------------------------------|
+| `--version`   | `release`               | Posit Connect version. Use "latest" or "release" for the most recent version, or specify a version like "2024.08.0". |
+| `--license`   | `./rstudio-connect.lic` | Path to license file. This file must exist and be a valid Connect license.                                           |
+| `--image`     |                         | Container image to use, including tag (e.g., `posit/connect:2025.12.0`). Overrides `--version`.                      |
+| `--config`    |                         | Path to optional rstudio-connect.gcfg configuration file                                                             |
+| `--port`      | `3939`                  | Port to map the Connect container to. Allows running multiple Connect instances simultaneously.                      |
+| `-e`, `--env` |                         | Environment variables to pass to the Docker container (format: KEY=VALUE). Can be specified multiple times.          |
 
 Example:
 
@@ -88,6 +91,23 @@ If you need env vars that are useful for the command running after `--`, just se
 This project contains a GitHub Action for use in CI/CD workflows. Use the `@v1` tag to get the latest stable version, or `@main` for the development version.
 
 You will need to store your Posit Connect license file as a GitHub secret (e.g., `CONNECT_LICENSE_FILE`).
+
+### GitHub Action Inputs
+
+The GitHub Action supports the following inputs:
+
+| Input         | Required | Default   | Description                                                                                   |
+|---------------|----------|-----------|-----------------------------------------------------------------------------------------------|
+| `license`     | Yes      |           | Posit Connect license file contents (store as a GitHub secret)                                |
+| `version`     | No       | `release` | Posit Connect version                                                                         |
+| `image`       | No       |           | Container image to use, including tag (e.g., `posit/connect:2025.12.0`). Overrides `version`. |
+| `config-file` | No       |           | Path to rstudio-connect.gcfg configuration file                                               |
+| `port`        | No       | `3939`    | Port to map the Connect container to                                                          |
+| `quiet`       | No       | `false`   | Suppress progress indicators during image pull                                                |
+| `env`         | No       |           | Environment variables to pass to Docker container (one per line, format: KEY=VALUE)           |
+| `command`     | Yes      |           | Command to run against Connect                                                                |
+
+### Deploy a Connect Manifest
 
 ```yaml
 name: Integration tests with Connect
@@ -139,19 +159,7 @@ The `$CONNECT_API_KEY` and `$CONNECT_SERVER` environment variables are available
     command: 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
 ```
 
-### GitHub Action Options
-
-The GitHub Action supports the following inputs:
-
-- `license` (required): Posit Connect license key (store as a GitHub secret)
-- `version` (optional): Posit Connect version (default: release)
-- `config-file` (optional): Path to rstudio-connect.gcfg configuration file
-- `port` (optional): Port to map the Connect container to (default: 3939)
-- `quiet` (optional): Suppress progress indicators during image pull (default: false)
-- `env` (optional): Environment variables to pass to Docker container (one per line, format: KEY=VALUE)
-- `command` (required): Command to run against Connect
-
-Example with environment variables:
+### Set Environment Variables
 
 ```yaml
 - name: Test deployment with custom env vars
@@ -162,6 +170,17 @@ Example with environment variables:
     env: |
       MY_VAR=value
       ANOTHER_VAR=123
+    command: rsconnect deploy manifest .
+```
+
+### Specify a Custom Container Image
+
+```yaml
+- name: Test deployment with custom image
+  uses: posit-dev/with-connect@v1
+  with:
+    image: rstudio/rstudio-connect:jammy-2025.09.0
+    license: ${{ secrets.CONNECT_LICENSE_FILE }}
     command: rsconnect deploy manifest .
 ```
 
