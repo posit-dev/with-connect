@@ -146,6 +146,20 @@ def ensure_image(client, base_image: str, tag: str, version: str, quiet: bool) -
             raise RuntimeError(f"Failed to pull image and no local copy available: {e}")
 
 
+def parse_image_spec(image: str) -> tuple[str, str, bool]:
+    """
+    Parse an image specification into base image and tag.
+
+    Returns:
+        tuple[str, str, bool]: (base_image, tag, used_default_tag)
+    """
+    try:
+        base_image, tag = image.rsplit(":", 1)
+        return (base_image, tag, False)
+    except ValueError:
+        return (image, "latest", True)
+
+
 def get_docker_tag(version: str) -> tuple[str, str]:
     """
     Convert a version string to the appropriate Docker image and tag.
@@ -212,21 +226,17 @@ def main() -> int:
             raise RuntimeError(f"Config file does not exist: {config_path}")
 
     if args.image and args.version != VERSION:
-        raise RuntimeError("Cannot specify both --image and --version")
+        raise RuntimeError("Cannot specify both 'image' and 'version'")
 
     client = docker.from_env()
 
     if args.image:
-        try:
-            base_image, tag = args.image.rsplit(":", 1)
-        except ValueError:
-            raise RuntimeError(
-                f"Invalid image format: '{args.image}'. Image must include a tag (e.g., rstudio/rstudio-connect:2025.09.0)"
-            )
-        image_name = args.image
+        base_image, tag, used_default = parse_image_spec(args.image)
+        if used_default:
+            print(f"No tag specified for image '{args.image}'. Using default tag 'latest'.")
     else:
         base_image, tag = get_docker_tag(args.version)
-        image_name = f"{base_image}:{tag}"
+    image_name = f"{base_image}:{tag}"
 
     bootstrap_secret = base64.b64encode(os.urandom(32)).decode("utf-8")
 

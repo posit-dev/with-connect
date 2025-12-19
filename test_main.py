@@ -207,34 +207,23 @@ def test_image_and_version_exclusive():
         )
 
         assert result.returncode == 1
-        assert "Cannot specify both --image and --version" in result.stderr
+        assert "Cannot specify both 'image' and 'version'" in result.stderr
     finally:
         os.unlink(license_file)
 
 
 def test_image_without_tag():
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".lic", delete=False) as f:
-        license_file = f.name
+    base_image, tag, used_default = main.parse_image_spec("rstudio/rstudio-connect")
+    assert base_image == "rstudio/rstudio-connect"
+    assert tag == "latest"
+    assert used_default is True
 
-    try:
-        result = subprocess.run(
-            [
-                sys.executable,
-                "main.py",
-                "--license",
-                license_file,
-                "--image",
-                "rstudio/rstudio-connect",
-            ],
-            capture_output=True,
-            text=True,
-        )
 
-        assert result.returncode == 1
-        assert "Invalid image format" in result.stderr
-        assert "Image must include a tag" in result.stderr
-    finally:
-        os.unlink(license_file)
+def test_image_with_tag():
+    base_image, tag, used_default = main.parse_image_spec("rstudio/rstudio-connect:jammy-2025.09.0")
+    assert base_image == "rstudio/rstudio-connect"
+    assert tag == "jammy-2025.09.0"
+    assert used_default is False
 
 
 if __name__ == "__main__":
@@ -258,6 +247,9 @@ if __name__ == "__main__":
 
     test_image_without_tag()
     print("✓ test_image_without_tag passed")
+
+    test_image_with_tag()
+    print("✓ test_image_with_tag passed")
 
     test_get_docker_tag_latest()
     print("✓ test_get_docker_tag_latest passed")
