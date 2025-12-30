@@ -88,7 +88,7 @@ If you need env vars that are useful for the command running after `--`, just se
 
 ## GitHub Actions
 
-This project contains a GitHub Action for use in CI/CD workflows. Use the `@v1` tag to get the latest stable version, or `@main` for the development version.
+This project contains a GitHub Action for use in CI/CD workflows. Use the `@main` tag to reference the action.
 
 You will need to store your Posit Connect license file as a GitHub secret (e.g., `CONNECT_LICENSE_FILE`).
 
@@ -122,7 +122,7 @@ jobs:
       - uses: actions/checkout@v5
 
       - name: Test deployment
-        uses: posit-dev/with-connect@v1
+        uses: posit-dev/with-connect@main
         with:
           version: 2025.09.0
           license: ${{ secrets.CONNECT_LICENSE_FILE }}
@@ -135,7 +135,7 @@ Unlike the CLI, the GitHub Action automatically wraps commands in `bash -c`, so 
 
 ```yaml
 - name: Run multiple commands
-  uses: posit-dev/with-connect@v1
+  uses: posit-dev/with-connect@main
   with:
     version: 2025.09.0
     license: ${{ secrets.CONNECT_LICENSE_FILE }}
@@ -152,7 +152,7 @@ The `$CONNECT_API_KEY` and `$CONNECT_SERVER` environment variables are available
 
 ```yaml
 - name: Single line with special characters
-  uses: posit-dev/with-connect@v1
+  uses: posit-dev/with-connect@main
   with:
     version: 2025.09.0
     license: ${{ secrets.CONNECT_LICENSE_FILE }}
@@ -163,7 +163,7 @@ The `$CONNECT_API_KEY` and `$CONNECT_SERVER` environment variables are available
 
 ```yaml
 - name: Test deployment with custom env vars
-  uses: posit-dev/with-connect@v1
+  uses: posit-dev/with-connect@main
   with:
     version: 2025.09.0
     license: ${{ secrets.CONNECT_LICENSE_FILE }}
@@ -177,7 +177,7 @@ The `$CONNECT_API_KEY` and `$CONNECT_SERVER` environment variables are available
 
 ```yaml
 - name: Test deployment with custom image
-  uses: posit-dev/with-connect@v1
+  uses: posit-dev/with-connect@main
   with:
     image: rstudio/rstudio-connect:jammy-2025.09.0
     license: ${{ secrets.CONNECT_LICENSE_FILE }}
