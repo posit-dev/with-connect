@@ -105,9 +105,9 @@ def pull_image(client, base_image: str, tag: str, quiet: bool) -> None:
     image_name = f"{base_image}:{tag}"
 
     if quiet:
-        print(f"Pulling image {image_name}...")
+        print(f"Pulling image {image_name}...", file=sys.stderr)
     else:
-        print(f"Pulling image {image_name}...", end="", flush=True)
+        print(f"Pulling image {image_name}...", end="", flush=True, file=sys.stderr)
 
     pull_stream = client.api.pull(
         base_image, tag=tag, platform="linux/amd64", stream=True, decode=True
@@ -118,12 +118,12 @@ def pull_image(client, base_image: str, tag: str, quiet: bool) -> None:
         if "status" in chunk:
             dot_count += 1
             if dot_count % 10 == 0 and not quiet:
-                print(".", end="", flush=True)
+                print(".", end="", flush=True, file=sys.stderr)
 
     if not quiet:
-        print()
+        print(file=sys.stderr)
 
-    print(f"Successfully pulled {image_name}")
+    print(f"Successfully pulled {image_name}", file=sys.stderr)
 
 
 def ensure_image(client, base_image: str, tag: str, version: str, quiet: bool) -> None:
@@ -140,14 +140,14 @@ def ensure_image(client, base_image: str, tag: str, version: str, quiet: bool) -
     is_release = version in ("latest", "release", "preview")
 
     if not is_release and has_local_image(client, image_name):
-        print(f"Using locally cached image {image_name}")
+        print(f"Using locally cached image {image_name}", file=sys.stderr)
         return
 
     try:
         pull_image(client, base_image, tag, quiet)
     except Exception as e:
         if has_local_image(client, image_name):
-            print(f"Pull failed, but using locally cached image {image_name}")
+            print(f"Pull failed, but using locally cached image {image_name}", file=sys.stderr)
         else:
             raise RuntimeError(f"Failed to pull image and no local copy available: {e}")
 
@@ -228,7 +228,7 @@ def main() -> int:
         try:
             container = client.containers.get(args.stop)
             container.stop()
-            print(f"Stopped container {args.stop}")
+            print(f"Stopped container {args.stop}", file=sys.stderr)
             return 0
         except docker.errors.NotFound:
             raise RuntimeError(f"Container not found: {args.stop}")
@@ -250,7 +250,7 @@ def main() -> int:
     if args.image:
         base_image, tag, used_default = parse_image_spec(args.image)
         if used_default:
-            print(f"No tag specified for image '{args.image}'. Using default tag 'latest'.")
+            print(f"No tag specified for image '{args.image}'. Using default tag 'latest'.", file=sys.stderr)
     else:
         base_image, tag = get_docker_tag(args.version)
     image_name = f"{base_image}:{tag}"
@@ -306,16 +306,16 @@ def main() -> int:
     stop_container = True
 
     try:
-        print(f"Waiting for port {args.port} to open...")
+        print(f"Waiting for port {args.port} to open...", file=sys.stderr)
         if not is_port_open("localhost", args.port, timeout=60.0):
-            print("\nContainer logs:")
-            print(container.logs().decode("utf-8", errors="replace"))
+            print("\nContainer logs:", file=sys.stderr)
+            print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
             raise RuntimeError("Posit Connect did not start within 60 seconds.")
 
-        print("Waiting for HTTP server to start...")
+        print("Waiting for HTTP server to start...", file=sys.stderr)
         if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
-            print("\nContainer logs:")
-            print(container.logs().decode("utf-8", errors="replace"))
+            print("\nContainer logs:", file=sys.stderr)
+            print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
             raise RuntimeError(
                 "Posit Connect did not log HTTP server start within 60 seconds."
             )
@@ -402,11 +402,11 @@ def wait_for_http_server(
         if not version:
             version = extract_server_version(logs)
             if version:
-                print(f"Running Posit Connect v{version}")
+                print(f"Running Posit Connect v{version}", file=sys.stderr)
 
         if "Unable to obtain a valid license" in logs:
-            print("\nContainer logs:")
-            print(logs)
+            print("\nContainer logs:", file=sys.stderr)
+            print(logs, file=sys.stderr)
             container.stop()
             raise RuntimeError(
                 "Unable to obtain a valid license. Your Posit Connect license may be expired or invalid. Please check your license file."
@@ -444,17 +444,17 @@ def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
         if response and "api_key" in response:
             api_key = response["api_key"]
             if not api_key:
-                print("\nContainer logs:")
-                print(container.logs().decode("utf-8", errors="replace"))
+                print("\nContainer logs:", file=sys.stderr)
+                print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
                 raise RuntimeError("Bootstrap succeeded but returned empty API key")
             return api_key
         else:
-            print("\nContainer logs:")
-            print(container.logs().decode("utf-8", errors="replace"))
+            print("\nContainer logs:", file=sys.stderr)
+            print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
             raise RuntimeError(f"Bootstrap returned unexpected response: {response}")
     except Exception as e:
-        print("\nContainer logs:")
-        print(container.logs().decode("utf-8", errors="replace"))
+        print("\nContainer logs:", file=sys.stderr)
+        print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
         raise RuntimeError(f"Failed to bootstrap Connect and retrieve API key: {e}")
 
 
