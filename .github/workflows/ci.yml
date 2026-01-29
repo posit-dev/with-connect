@@ -56,6 +56,60 @@ jobs:
             [ "$TEST_STRING" = "This contains single quotes" ] || exit 1
             echo "✓ Multiline test passed - variables, single quotes, and double quotes all work"
 
+  test-action-start-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Start Connect (no command)
+        id: start-connect
+        uses: ./
+        with:
+          version: 2024.08.0
+          license: ${{ secrets.CONNECT_LICENSE }}
+
+      - name: Verify outputs are set
+        run: |
+          set -euo pipefail
+          echo "API Key length: ${#API_KEY}"
+          echo "Server: $SERVER"
+          echo "Container ID: $CONTAINER_ID"
+          [ -n "$API_KEY" ] || { echo "ERROR: api-key output is empty"; exit 1; }
+          [ -n "$SERVER" ] || { echo "ERROR: server output is empty"; exit 1; }
+          [ -n "$CONTAINER_ID" ] || { echo "ERROR: container-id output is empty"; exit 1; }
+          echo "✓ All outputs are set"
+        env:
+          API_KEY: ${{ steps.start-connect.outputs.api-key }}
+          SERVER: ${{ steps.start-connect.outputs.server }}
+          CONTAINER_ID: ${{ steps.start-connect.outputs.container-id }}
+
+      - name: Use Connect with outputs
+        run: |
+          set -euo pipefail
+          RESPONSE=$(curl -f -H "Authorization: Key $API_KEY" "$SERVER/__api__/v1/content")
+          echo "Response: $RESPONSE"
+          [ "$RESPONSE" = "[]" ] || exit 1
+          echo "✓ Successfully used Connect with action outputs"
+        env:
+          API_KEY: ${{ steps.start-connect.outputs.api-key }}
+          SERVER: ${{ steps.start-connect.outputs.server }}
+
+      - name: Stop Connect
+        uses: ./
+        with:
+          stop: ${{ steps.start-connect.outputs.container-id }}
+
+      - name: Verify container stopped
+        run: |
+          set -euo pipefail
+          if docker ps -q --filter "id=$CONTAINER_ID" | grep -q .; then
+            echo "ERROR: Container is still running"
+            exit 1
+          fi
+          echo "✓ Container successfully stopped"
+        env:
+          CONTAINER_ID: ${{ steps.start-connect.outputs.container-id }}
+
   test-cli:
     runs-on: ubuntu-latest
     steps:

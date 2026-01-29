@@ -69,6 +69,7 @@ Without `bash -c`, the environment variables would be evaluated before `with-con
 | `--config`    |                         | Path to optional rstudio-connect.gcfg configuration file                                                             |
 | `--port`      | `3939`                  | Port to map the Connect container to. Allows running multiple Connect instances simultaneously.                      |
 | `-e`, `--env` |                         | Environment variables to pass to the Docker container (format: KEY=VALUE). Can be specified multiple times.          |
+| `--stop`      |                         | Stop a running Connect container by ID (use instead of starting a new container).                                    |
 
 Example:
 
@@ -85,6 +86,23 @@ with-connect -e MY_VAR=value -e ANOTHER_VAR=123 -- rsconnect deploy manifest .
 You can use this to override Connect server configuration by passing in `CONNECT_` prefixed variables, following https://docs.posit.co/connect/admin/appendix/configuration/#environment-variables.
 
 If you need env vars that are useful for the command running after `--`, just set them in the environment from which you call `with-connect`: the command will inherit that environment.
+
+### Start-Only Mode
+
+If you omit the command after `--`, Connect will start and remain running. The tool outputs JSON with credentials you can use to interact with Connect:
+
+```bash
+with-connect --license ./rstudio-connect.lic
+# Outputs: {"api_key": "...", "server": "http://localhost:3939", "container_id": "..."}
+```
+
+You can then use the container ID to stop Connect when you're done:
+
+```bash
+with-connect --stop <container_id>
+```
+
+This is useful when you need to run multiple commands or use other tools against the running Connect instance.
 
 ## GitHub Actions
 
@@ -105,7 +123,18 @@ The GitHub Action supports the following inputs:
 | `port`        | No       | `3939`    | Port to map the Connect container to                                                          |
 | `quiet`       | No       | `false`   | Suppress progress indicators during image pull                                                |
 | `env`         | No       |           | Environment variables to pass to Docker container (one per line, format: KEY=VALUE)           |
-| `command`     | Yes      |           | Command to run against Connect                                                                |
+| `command`     | No       |           | Command to run against Connect (omit for start-only mode)                                     |
+| `stop`        | No       |           | Container ID to stop (use instead of starting a new container)                                |
+
+### GitHub Action Outputs
+
+When no `command` is provided (start-only mode), the action sets these outputs:
+
+| Output         | Description                              |
+|----------------|------------------------------------------|
+| `api-key`      | Connect API key for authentication       |
+| `server`       | Connect server URL (e.g., `http://localhost:3939`) |
+| `container-id` | Docker container ID (use with `stop` input to stop the container) |
 
 ### Deploy a Connect Manifest
 
@@ -182,6 +211,46 @@ The `$CONNECT_API_KEY` and `$CONNECT_SERVER` environment variables are available
     image: rstudio/rstudio-connect:jammy-2025.09.0
     license: ${{ secrets.CONNECT_LICENSE_FILE }}
     command: rsconnect deploy manifest .
+```
+
+### Multi-Step Workflows (Start-Only Mode)
+
+For workflows that need to run multiple steps against Connect, or use other actions with the running instance, use start-only mode:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Start Connect without a command - it will keep running
+      - name: Start Connect
+        id: connect
+        uses: posit-dev/with-connect@main
+        with:
+          version: 2025.09.0
+          license: ${{ secrets.CONNECT_LICENSE_FILE }}
+
+      # Use the outputs in subsequent steps
+      - name: Deploy content
+        run: rsconnect deploy manifest .
+        env:
+          CONNECT_API_KEY: ${{ steps.connect.outputs.api-key }}
+          CONNECT_SERVER: ${{ steps.connect.outputs.server }}
+
+      # Use another action with Connect
+      - name: Run integration tests
+        uses: some-other-action@v1
+        with:
+          connect-url: ${{ steps.connect.outputs.server }}
+          api-key: ${{ steps.connect.outputs.api-key }}
+
+      # Stop Connect when done
+      - name: Stop Connect
+        uses: posit-dev/with-connect@main
+        with:
+          stop: ${{ steps.connect.outputs.container-id }}
 ```
 
 ## Minimum Version
