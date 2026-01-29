@@ -1,5 +1,6 @@
 import argparse
 import base64
+import json
 import os
 import re
 import socket
@@ -60,6 +61,11 @@ def parse_args():
         type=int,
         default=3939,
         help="Port to map the Connect container to (default: 3939)",
+    )
+    parser.add_argument(
+        "--stop",
+        metavar="CONTAINER_ID",
+        help="Stop a running Connect container by ID",
     )
 
     # Handle -- separator and capture remaining args
@@ -216,6 +222,17 @@ def main() -> int:
     """
     args = parse_args()
 
+    # Handle --stop mode: just stop the container and exit
+    if args.stop:
+        client = docker.from_env()
+        try:
+            container = client.containers.get(args.stop)
+            container.stop()
+            print(f"Stopped container {args.stop}")
+            return 0
+        except docker.errors.NotFound:
+            raise RuntimeError(f"Container not found: {args.stop}")
+
     license_path = os.path.abspath(os.path.expanduser(args.license))
     if not os.path.exists(license_path):
         raise RuntimeError(f"License file does not exist: {license_path}")
@@ -286,6 +303,7 @@ def main() -> int:
     )
 
     server_url = f"http://localhost:{args.port}"
+    stop_container = True
 
     try:
         print(f"Waiting for port {args.port} to open...")
@@ -317,10 +335,20 @@ def main() -> int:
                 exit_code = result.returncode
             except subprocess.CalledProcessError as e:
                 exit_code = e.returncode
+        else:
+            # Start-only mode: output credentials and keep container running
+            output = {
+                "api_key": api_key,
+                "server": server_url,
+                "container_id": container.id,
+            }
+            print(json.dumps(output))
+            stop_container = False
 
         return exit_code
     finally:
-        container.stop()
+        if stop_container:
+            container.stop()
 
 
 def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
