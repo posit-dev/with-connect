@@ -26,8 +26,22 @@ inputs:
     description: 'Environment variables to pass to Docker container (one per line, format: KEY=VALUE)'
     required: false
   command:
-    description: 'Command to run against Connect'
-    required: true
+    description: 'Command to run against Connect (omit to start Connect and output credentials)'
+    required: false
+  stop:
+    description: 'Container ID to stop (use instead of starting a new container)'
+    required: false
+
+outputs:
+  CONNECT_API_KEY:
+    description: 'Connect API key (only set when no command is provided)'
+    value: ${{ steps.run.outputs.CONNECT_API_KEY }}
+  CONNECT_SERVER:
+    description: 'Connect server URL (only set when no command is provided)'
+    value: ${{ steps.run.outputs.CONNECT_SERVER }}
+  CONTAINER_ID:
+    description: 'Docker container ID (only set when no command is provided)'
+    value: ${{ steps.run.outputs.CONTAINER_ID }}
 
 runs:
   using: composite
@@ -44,8 +58,16 @@ runs:
       run: echo "${{ inputs.license }}" > rstudio-connect.lic
 
     - name: Run command
+      id: run
       shell: bash
       run: |
+        # Handle stop mode
+        if [ -n "${{ inputs.stop }}" ]; then
+          with-connect --stop "${{ inputs.stop }}"
+          exit 0
+        fi
+
+        # Build arguments
         ARGS="--version ${{ inputs.version }} --port ${{ inputs.port }}"
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config-file }}"
@@ -63,6 +85,14 @@ runs:
             fi
           done <<< "${{ inputs.env }}"
         fi
-        with-connect $ARGS -- bash <<'SCRIPT'
+
+        # Check if command is provided
+        if [ -z "${{ inputs.command }}" ]; then
+          # Start-only mode: output is already in KEY=value format
+          with-connect $ARGS >> $GITHUB_OUTPUT
+        else
+          # Run with command
+          with-connect $ARGS -- bash <<'SCRIPT'
         ${{ inputs.command }}
         SCRIPT
+        fi

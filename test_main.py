@@ -226,6 +226,30 @@ def test_image_with_tag():
     assert used_default is False
 
 
+def test_stop_argument_in_help():
+    """Test that --stop argument is available."""
+    result = subprocess.run(
+        [sys.executable, "main.py", "--help"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert "--stop" in result.stdout
+    assert "CONTAINER_ID" in result.stdout
+
+
+def test_stop_nonexistent_container():
+    """Test that --stop with nonexistent container returns error."""
+    result = subprocess.run(
+        [sys.executable, "main.py", "--stop", "nonexistent_container_id"],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "Container not found" in result.stderr
+
+
 if __name__ == "__main__":
     test_license_file_not_exists()
     print("✓ test_license_file_not_exists passed")
@@ -295,5 +319,11 @@ if __name__ == "__main__":
 
     test_custom_port()
     print("✓ test_custom_port passed")
+
+    test_stop_argument_in_help()
+    print("✓ test_stop_argument_in_help passed")
+
+    test_stop_nonexistent_container()
+    print("✓ test_stop_nonexistent_container passed")
 
     print("\nAll tests passed!")
