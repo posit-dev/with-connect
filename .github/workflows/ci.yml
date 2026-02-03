@@ -71,33 +71,33 @@ jobs:
       - name: Verify outputs are set
         run: |
           set -euo pipefail
-          echo "API Key length: ${#API_KEY}"
-          echo "Server: $SERVER"
+          echo "API Key length: ${#CONNECT_API_KEY}"
+          echo "Server: $CONNECT_SERVER"
           echo "Container ID: $CONTAINER_ID"
-          [ -n "$API_KEY" ] || { echo "ERROR: api-key output is empty"; exit 1; }
-          [ -n "$SERVER" ] || { echo "ERROR: server output is empty"; exit 1; }
-          [ -n "$CONTAINER_ID" ] || { echo "ERROR: container-id output is empty"; exit 1; }
+          [ -n "$CONNECT_API_KEY" ] || { echo "ERROR: CONNECT_API_KEY output is empty"; exit 1; }
+          [ -n "$CONNECT_SERVER" ] || { echo "ERROR: CONNECT_SERVER output is empty"; exit 1; }
+          [ -n "$CONTAINER_ID" ] || { echo "ERROR: CONTAINER_ID output is empty"; exit 1; }
           echo "✓ All outputs are set"
         env:
-          API_KEY: ${{ steps.start-connect.outputs.api-key }}
-          SERVER: ${{ steps.start-connect.outputs.server }}
-          CONTAINER_ID: ${{ steps.start-connect.outputs.container-id }}
+          CONNECT_API_KEY: ${{ steps.start-connect.outputs.CONNECT_API_KEY }}
+          CONNECT_SERVER: ${{ steps.start-connect.outputs.CONNECT_SERVER }}
+          CONTAINER_ID: ${{ steps.start-connect.outputs.CONTAINER_ID }}
 
       - name: Use Connect with outputs
         run: |
           set -euo pipefail
-          RESPONSE=$(curl -f -H "Authorization: Key $API_KEY" "$SERVER/__api__/v1/content")
+          RESPONSE=$(curl -f -H "Authorization: Key $CONNECT_API_KEY" "$CONNECT_SERVER/__api__/v1/content")
           echo "Response: $RESPONSE"
           [ "$RESPONSE" = "[]" ] || exit 1
           echo "✓ Successfully used Connect with action outputs"
         env:
-          API_KEY: ${{ steps.start-connect.outputs.api-key }}
-          SERVER: ${{ steps.start-connect.outputs.server }}
+          CONNECT_API_KEY: ${{ steps.start-connect.outputs.CONNECT_API_KEY }}
+          CONNECT_SERVER: ${{ steps.start-connect.outputs.CONNECT_SERVER }}
 
       - name: Stop Connect
         uses: ./
         with:
-          stop: ${{ steps.start-connect.outputs.container-id }}
+          stop: ${{ steps.start-connect.outputs.CONTAINER_ID }}
 
       - name: Verify container stopped
         run: |
@@ -108,7 +108,7 @@ jobs:
           fi
           echo "✓ Container successfully stopped"
         env:
-          CONTAINER_ID: ${{ steps.start-connect.outputs.container-id }}
+          CONTAINER_ID: ${{ steps.start-connect.outputs.CONTAINER_ID }}
 
   test-cli:
     runs-on: ubuntu-latest

@@ -137,11 +137,11 @@ The GitHub Action supports the following inputs:
 
 When no `command` is provided (start-only mode), the action sets these outputs:
 
-| Output         | Description                              |
-|----------------|------------------------------------------|
-| `api-key`      | Connect API key for authentication       |
-| `server`       | Connect server URL (e.g., `http://localhost:3939`) |
-| `container-id` | Docker container ID (use with `stop` input to stop the container) |
+| Output            | Description                              |
+|-------------------|------------------------------------------|
+| `CONNECT_API_KEY` | Connect API key for authentication       |
+| `CONNECT_SERVER`  | Connect server URL (e.g., `http://localhost:3939`) |
+| `CONTAINER_ID`    | Docker container ID (use with `stop` input to stop the container) |
 
 ### Deploy a Connect Manifest
 
@@ -243,21 +243,21 @@ jobs:
       - name: Deploy content
         run: rsconnect deploy manifest .
         env:
-          CONNECT_API_KEY: ${{ steps.connect.outputs.api-key }}
-          CONNECT_SERVER: ${{ steps.connect.outputs.server }}
+          CONNECT_API_KEY: ${{ steps.connect.outputs.CONNECT_API_KEY }}
+          CONNECT_SERVER: ${{ steps.connect.outputs.CONNECT_SERVER }}
 
       # Use another action with Connect
       - name: Run integration tests
         uses: some-other-action@v1
         with:
-          connect-url: ${{ steps.connect.outputs.server }}
-          api-key: ${{ steps.connect.outputs.api-key }}
+          connect-url: ${{ steps.connect.outputs.CONNECT_SERVER }}
+          api-key: ${{ steps.connect.outputs.CONNECT_API_KEY }}
 
       # Stop Connect when done
       - name: Stop Connect
         uses: posit-dev/with-connect@main
         with:
-          stop: ${{ steps.connect.outputs.container-id }}
+          stop: ${{ steps.connect.outputs.CONTAINER_ID }}
 ```
 
 ## Minimum Version

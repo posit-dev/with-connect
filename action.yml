@@ -33,15 +33,15 @@ inputs:
     required: false
 
 outputs:
-  api-key:
+  CONNECT_API_KEY:
     description: 'Connect API key (only set when no command is provided)'
-    value: ${{ steps.run.outputs.api-key }}
-  server:
+    value: ${{ steps.run.outputs.CONNECT_API_KEY }}
+  CONNECT_SERVER:
     description: 'Connect server URL (only set when no command is provided)'
-    value: ${{ steps.run.outputs.server }}
-  container-id:
+    value: ${{ steps.run.outputs.CONNECT_SERVER }}
+  CONTAINER_ID:
     description: 'Docker container ID (only set when no command is provided)'
-    value: ${{ steps.run.outputs.container-id }}
+    value: ${{ steps.run.outputs.CONTAINER_ID }}
 
 runs:
   using: composite
@@ -88,11 +88,8 @@ runs:
 
         # Check if command is provided
         if [ -z "${{ inputs.command }}" ]; then
-          # Start-only mode: capture shell output and set outputs
-          OUTPUT=$(with-connect $ARGS)
-          echo "api-key=$(echo "$OUTPUT" | grep '^CONNECT_API_KEY=' | cut -d= -f2-)" >> $GITHUB_OUTPUT
-          echo "server=$(echo "$OUTPUT" | grep '^CONNECT_SERVER=' | cut -d= -f2-)" >> $GITHUB_OUTPUT
-          echo "container-id=$(echo "$OUTPUT" | grep '^CONTAINER_ID=' | cut -d= -f2-)" >> $GITHUB_OUTPUT
+          # Start-only mode: output is already in KEY=value format
+          with-connect $ARGS >> $GITHUB_OUTPUT
         else
           # Run with command
           with-connect $ARGS -- bash <<'SCRIPT'
