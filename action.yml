@@ -88,11 +88,11 @@ runs:
 
         # Check if command is provided
         if [ -z "${{ inputs.command }}" ]; then
-          # Start-only mode: capture JSON output and set outputs
+          # Start-only mode: capture shell output and set outputs
           OUTPUT=$(with-connect $ARGS)
-          echo "api-key=$(echo "$OUTPUT" | jq -r '.api_key')" >> $GITHUB_OUTPUT
-          echo "server=$(echo "$OUTPUT" | jq -r '.server')" >> $GITHUB_OUTPUT
-          echo "container-id=$(echo "$OUTPUT" | jq -r '.container_id')" >> $GITHUB_OUTPUT
+          echo "api-key=$(echo "$OUTPUT" | grep '^CONNECT_API_KEY=' | cut -d= -f2-)" >> $GITHUB_OUTPUT
+          echo "server=$(echo "$OUTPUT" | grep '^CONNECT_SERVER=' | cut -d= -f2-)" >> $GITHUB_OUTPUT
+          echo "container-id=$(echo "$OUTPUT" | grep '^CONTAINER_ID=' | cut -d= -f2-)" >> $GITHUB_OUTPUT
         else
           # Run with command
           with-connect $ARGS -- bash <<'SCRIPT'

@@ -69,7 +69,7 @@ Without `bash -c`, the environment variables would be evaluated before `with-con
 | `--config`    |                         | Path to optional rstudio-connect.gcfg configuration file                                                             |
 | `--port`      | `3939`                  | Port to map the Connect container to. Allows running multiple Connect instances simultaneously.                      |
 | `-e`, `--env` |                         | Environment variables to pass to the Docker container (format: KEY=VALUE). Can be specified multiple times.          |
-| `--stop`      |                         | Stop a running Connect container by ID (use instead of starting a new container).                                    |
+| `--stop`      |                         | Stop a running Connect container by ID, or use `CONTAINER_ID` env var if not specified.                              |
 
 Example:
 
@@ -89,17 +89,24 @@ If you need env vars that are useful for the command running after `--`, just se
 
 ### Start-Only Mode
 
-If you omit the command after `--`, Connect will start and remain running. The tool outputs JSON with credentials you can use to interact with Connect:
+If you omit the command after `--`, Connect will start and remain running. The tool outputs shell variables you can use to interact with Connect:
 
 ```bash
 with-connect --license ./rstudio-connect.lic
-# Outputs: {"api_key": "...", "server": "http://localhost:3939", "container_id": "..."}
+# Outputs:
+# CONNECT_API_KEY=...
+# CONNECT_SERVER=http://localhost:3939
+# CONTAINER_ID=...
 ```
 
-You can then use the container ID to stop Connect when you're done:
+You can eval the output to set the variables in your shell:
 
 ```bash
-with-connect --stop <container_id>
+eval $(with-connect --license ./rstudio-connect.lic)
+curl -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content
+
+# Stop Connect when done (--stop without argument uses $CONTAINER_ID)
+with-connect --stop
 ```
 
 This is useful when you need to run multiple commands or use other tools against the running Connect instance.

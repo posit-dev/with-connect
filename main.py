@@ -1,6 +1,5 @@
 import argparse
 import base64
-import json
 import os
 import re
 import socket
@@ -64,8 +63,11 @@ def parse_args():
     )
     parser.add_argument(
         "--stop",
+        nargs="?",
+        default=None,
+        const="",  # sentinel for --stop without argument
         metavar="CONTAINER_ID",
-        help="Stop a running Connect container by ID",
+        help="Stop a running Connect container by ID (uses CONTAINER_ID env var if not specified)",
     )
 
     # Handle -- separator and capture remaining args
@@ -223,15 +225,18 @@ def main() -> int:
     args = parse_args()
 
     # Handle --stop mode: just stop the container and exit
-    if args.stop:
+    if args.stop is not None:
+        container_id = args.stop or os.environ.get("CONTAINER_ID")
+        if not container_id:
+            raise RuntimeError("No container ID provided and CONTAINER_ID environment variable not set")
         client = docker.from_env()
         try:
-            container = client.containers.get(args.stop)
+            container = client.containers.get(container_id)
             container.stop()
-            print(f"Stopped container {args.stop}", file=sys.stderr)
+            print(f"Stopped container {container_id}", file=sys.stderr)
             return 0
         except docker.errors.NotFound:
-            raise RuntimeError(f"Container not found: {args.stop}")
+            raise RuntimeError(f"Container not found: {container_id}")
 
     license_path = os.path.abspath(os.path.expanduser(args.license))
     if not os.path.exists(license_path):
@@ -337,12 +342,9 @@ def main() -> int:
                 exit_code = e.returncode
         else:
             # Start-only mode: output credentials and keep container running
-            output = {
-                "api_key": api_key,
-                "server": server_url,
-                "container_id": container.id,
-            }
-            print(json.dumps(output))
+            print(f"CONNECT_API_KEY={api_key}")
+            print(f"CONNECT_SERVER={server_url}")
+            print(f"CONTAINER_ID={container.id}")
             stop_container = False
 
         return exit_code
