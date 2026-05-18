@@ -82,18 +82,27 @@ def test_valid_license_http_server_starts():
 
 
 def test_get_docker_tag_latest():
-    assert main.get_docker_tag("latest") == ("rstudio/rstudio-connect", "jammy")
+    assert main.get_docker_tag("latest") == ("ghcr.io/posit-dev/connect", "latest")
 
 
 def test_get_docker_tag_release():
-    assert main.get_docker_tag("release") == ("rstudio/rstudio-connect", "jammy")
+    assert main.get_docker_tag("release") == ("ghcr.io/posit-dev/connect", "latest")
 
 
 def test_get_docker_tag_preview():
-    assert main.get_docker_tag("preview") == ("rstudio/rstudio-connect-preview", "jammy-daily")
+    assert main.get_docker_tag("preview") == ("ghcr.io/posit-dev/connect-preview", "daily")
+
+
+def test_get_docker_tag_ghcr_version():
+    # 2026.04 and later: ghcr.io/posit-dev/connect with bare version
+    assert main.get_docker_tag("2026.04.0") == ("ghcr.io/posit-dev/connect", "2026.04.0")
+    assert main.get_docker_tag("2026.05.1") == ("ghcr.io/posit-dev/connect", "2026.05.1")
+    assert main.get_docker_tag("2027.01.0") == ("ghcr.io/posit-dev/connect", "2027.01.0")
 
 
 def test_get_docker_tag_jammy_version():
+    # Pre-cutover jammy era (2023.07 - 2026.03): legacy Docker Hub jammy- prefix
+    assert main.get_docker_tag("2026.03.0") == ("rstudio/rstudio-connect", "jammy-2026.03.0")
     assert main.get_docker_tag("2025.09.0") == ("rstudio/rstudio-connect", "jammy-2025.09.0")
     assert main.get_docker_tag("2024.01.0") == ("rstudio/rstudio-connect", "jammy-2024.01.0")
     assert main.get_docker_tag("2023.07.0") == ("rstudio/rstudio-connect", "jammy-2023.07.0")
