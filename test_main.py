@@ -124,6 +124,24 @@ def test_get_docker_tag_invalid_format():
     assert main.get_docker_tag("custom-tag") == ("rstudio/rstudio-connect", "custom-tag")
 
 
+def test_force_amd64_legacy_rstudio_images():
+    # Legacy rstudio/* on Docker Hub and ghcr.io/rstudio/* mirrors are
+    # amd64-only and need the pin.
+    assert main._force_amd64("rstudio/rstudio-connect") is True
+    assert main._force_amd64("rstudio/rstudio-connect-preview") is True
+    assert main._force_amd64("ghcr.io/rstudio/rstudio-connect") is True
+    assert main._force_amd64("ghcr.io/rstudio/rstudio-connect-preview") is True
+
+
+def test_force_amd64_modern_images():
+    # Modern ghcr.io/posit-dev/* and posit/* images ship multi-arch
+    # manifests.
+    assert main._force_amd64("ghcr.io/posit-dev/connect") is False
+    assert main._force_amd64("ghcr.io/posit-dev/connect-preview") is False
+    assert main._force_amd64("posit/connect") is False
+    assert main._force_amd64("posit/connect-preview") is False
+
+
 def test_extract_server_version():
     logs = 'time="2025-11-06T13:05:18.626Z" level=info msg="Starting Posit Connect v2025.09.0"'
     assert main.extract_server_version(logs) == "2025.09.0"
