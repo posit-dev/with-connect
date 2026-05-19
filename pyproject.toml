@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "docker>=7.1.0",
-    "rsconnect>=1.27.1",
+    "rsconnect>=1.29.0",
 ]
 
 [project.scripts]
