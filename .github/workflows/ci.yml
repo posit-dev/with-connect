@@ -25,14 +25,17 @@ jobs:
         run: uv run test_main.py
 
   test-action:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v5
 
       - name: Test with-connect action (single line)
         uses: ./
         with:
-          version: 2024.08.0
           license: ${{ secrets.CONNECT_LICENSE }}
           # If this were not quoted before running, $CONNECT_API_KEY
           # would evaluate before with-connect defines it.
@@ -41,7 +44,6 @@ jobs:
       - name: Test with-connect action (multiline, different quoting)
         uses: ./
         with:
-          version: 2024.08.0
           license: ${{ secrets.CONNECT_LICENSE }}
           command: |
             set -euo pipefail
