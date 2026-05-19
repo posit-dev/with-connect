@@ -12,8 +12,15 @@ from rsconnect.api import RSConnectClient, RSConnectServer
 from rsconnect.json_web_token import TokenGenerator
 
 
-IMAGE = "rstudio/rstudio-connect"
+IMAGE = "ghcr.io/posit-dev/connect"
+PREVIEW_IMAGE = "ghcr.io/posit-dev/connect-preview"
+LEGACY_IMAGE = "rstudio/rstudio-connect"
 VERSION = "release"
+
+# Versions at or after this registry cutover land on ghcr.io/posit-dev.
+# Older versions only exist on the legacy Docker Hub images.
+REGISTRY_CUTOVER_YEAR = 2026
+REGISTRY_CUTOVER_MONTH = 4
 
 
 def parse_args():
@@ -172,41 +179,46 @@ def get_docker_tag(version: str) -> tuple[str, str]:
     """
     Convert a version string to the appropriate Docker image and tag.
 
-    Maps semantic versions to the correct base image and tag based on when
-    Connect switched from bionic (Ubuntu 18.04) to jammy (Ubuntu 22.04).
-    Also maps 'latest'/'release' to 'jammy' since 'latest' is unmaintained.
-    Maps 'preview' to the nightly build image.
+    Versions at or after the registry cutover (2026.04) come from
+    ghcr.io/posit-dev/connect, where the tag is just the version and the
+    image is a multi-arch manifest defaulting to the latest OS variant.
+
+    Older versions continue to resolve against rstudio/rstudio-connect on
+    Docker Hub with the legacy OS-prefixed tags (jammy- for the Ubuntu
+    22.04 era, bionic- for Ubuntu 18.04).
+
+    'latest' / 'release' map to ghcr.io/posit-dev/connect:latest. 'preview'
+    maps to ghcr.io/posit-dev/connect-preview:daily.
 
     Returns:
         tuple[str, str]: (base_image, tag)
     """
     if version == "preview":
-        # Map to nightly preview build
-        return ("rstudio/rstudio-connect-preview", "jammy-daily")
+        return (PREVIEW_IMAGE, "daily")
 
     if version in ("latest", "release"):
-        # For the rstudio/rstudio-connect image, "jammy" is currently used
-        # for the latest stable release. "latest" never gets updated and points
-        # to 2022.08.0, which, aside from being misleading, also does not
-        # have the bootstrap endpoint that this utility relies on.
-        return (IMAGE, "jammy")
+        return (IMAGE, "latest")
 
     parts = version.split(".")
     if len(parts) < 2:
-        return (IMAGE, version)
+        return (LEGACY_IMAGE, version)
 
     try:
         year = int(parts[0])
         month = int(parts[1])
     except ValueError:
-        return (IMAGE, version)
+        return (LEGACY_IMAGE, version)
 
-    if year > 2023 or (year == 2023 and month > 6):
-        return (IMAGE, f"jammy-{version}")
-    elif year > 2022 or (year == 2022 and month >= 9):
-        return (IMAGE, f"bionic-{version}")
-    else:
+    if year > REGISTRY_CUTOVER_YEAR or (
+        year == REGISTRY_CUTOVER_YEAR and month >= REGISTRY_CUTOVER_MONTH
+    ):
         return (IMAGE, version)
+    elif year > 2023 or (year == 2023 and month > 6):
+        return (LEGACY_IMAGE, f"jammy-{version}")
+    elif year > 2022 or (year == 2022 and month >= 9):
+        return (LEGACY_IMAGE, f"bionic-{version}")
+    else:
+        return (LEGACY_IMAGE, version)
 
 
 def main() -> int:
