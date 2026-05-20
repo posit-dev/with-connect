@@ -104,12 +104,31 @@ def has_local_image(client, image_name: str) -> bool:
         return False
 
 
+def _force_amd64(base_image: str) -> bool:
+    """
+    Whether to force linux/amd64 when pulling and running an image.
+
+    The legacy rstudio/* images on Docker Hub and their ghcr.io/rstudio/*
+    mirrors are amd64-only, so without an explicit platform pin the pull
+    fails on arm64 hosts with "no matching manifest for linux/arm64/v8".
+    Force the pin for any image under those namespaces.
+
+    Everything else — bakery's modern ghcr.io/posit-dev/* and posit/*
+    images, plus any custom or upstream multi-arch image — trusts
+    Docker's manifest selection to resolve the native architecture.
+    """
+    return base_image.startswith("rstudio/") or base_image.startswith(
+        "ghcr.io/rstudio/"
+    )
+
+
 def pull_image(client, base_image: str, tag: str, quiet: bool) -> None:
     """
     Pull a Docker image from the registry.
 
     Displays progress indicators (dots) unless quiet mode is enabled.
-    Always pulls for linux/amd64 platform for ARM compatibility.
+    Forces linux/amd64 for legacy amd64-only images; lets multi-arch
+    images resolve to the native host architecture.
     """
     image_name = f"{base_image}:{tag}"
 
@@ -118,9 +137,10 @@ def pull_image(client, base_image: str, tag: str, quiet: bool) -> None:
     else:
         print(f"Pulling image {image_name}...", end="", flush=True, file=sys.stderr)
 
-    pull_stream = client.api.pull(
-        base_image, tag=tag, platform="linux/amd64", stream=True, decode=True
-    )
+    pull_kwargs = {"tag": tag, "stream": True, "decode": True}
+    if _force_amd64(base_image):
+        pull_kwargs["platform"] = "linux/amd64"
+    pull_stream = client.api.pull(base_image, **pull_kwargs)
 
     dot_count = 0
     for chunk in pull_stream:
@@ -307,17 +327,19 @@ def main() -> int:
                 key, value = env_var.split("=", 1)
                 container_env[key] = value
 
-    container = client.containers.run(
-        image=image_name,
-        detach=True,
-        tty=True,
-        stdin_open=True,
-        privileged=True,
-        ports={"3939/tcp": args.port},
-        mounts=mounts,
-        platform="linux/amd64",
-        environment=container_env,
-    )
+    run_kwargs = {
+        "image": image_name,
+        "detach": True,
+        "tty": True,
+        "stdin_open": True,
+        "privileged": True,
+        "ports": {"3939/tcp": args.port},
+        "mounts": mounts,
+        "environment": container_env,
+    }
+    if _force_amd64(base_image):
+        run_kwargs["platform"] = "linux/amd64"
+    container = client.containers.run(**run_kwargs)
 
     server_url = f"http://localhost:{args.port}"
     stop_container = True
