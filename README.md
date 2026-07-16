@@ -70,6 +70,7 @@ Without `bash -c`, the environment variables would be evaluated before `with-con
 | `--port`      | `3939`                  | Port to map the Connect container to. Allows running multiple Connect instances simultaneously.                      |
 | `-e`, `--env` |                         | Environment variables to pass to the Docker container (format: KEY=VALUE). Can be specified multiple times.          |
 | `--stop`      |                         | Stop a running Connect container by ID, or use `CONTAINER_ID` env var if not specified.                              |
+| `--reset`     |                         | Reset a running start-only container to its clean baseline (same container, port, and API key), or use `CONTAINER_ID` env var if not specified. |
 
 Example:
 
@@ -105,11 +106,49 @@ You can eval the output to set the variables in your shell:
 eval $(with-connect --license ./rstudio-connect.lic)
 curl -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content
 
-# Stop Connect when done (--stop without argument uses $CONTAINER_ID)
-with-connect --stop
+# Stop Connect when done
+with-connect --stop "$CONTAINER_ID"
 ```
 
+`eval` sets these as ordinary shell variables, so pass `"$CONTAINER_ID"` explicitly. The no-argument forms of `--stop`/`--reset` instead read a `CONTAINER_ID` environment variable, which is how the GitHub Action wires them up.
+
 This is useful when you need to run multiple commands or use other tools against the running Connect instance.
+
+### Resetting Connect
+
+Every start-only container can be reset. `with-connect --reset` returns Connect to its clean, just-bootstrapped state — no deployed content, no extra users — **without stopping the container**. The same `CONNECT_API_KEY`, `CONNECT_SERVER`, and `CONTAINER_ID` stay valid, so a test framework can reset between runs and keep the credentials it already holds:
+
+```bash
+eval $(with-connect --license ./rstudio-connect.lic)
+
+# ... run a test that deploys content ...
+
+# Reset to a clean Connect between tests
+with-connect --reset "$CONTAINER_ID"
+# The same $CONNECT_API_KEY and $CONNECT_SERVER still work; Connect is now clean.
+
+# ... run the next test ...
+
+with-connect --stop "$CONTAINER_ID"
+```
+
+Reset is fast (usually a few seconds) because it never restarts the container, re-pulls the image, or re-bootstraps. Under the hood, start-only containers run Connect under a keep-alive process so Connect can be cycled in place; the reset restores a snapshot of the data directory captured right after bootstrap. Reset only applies to start-only containers (command mode containers are ephemeral).
+
+`--reset` supports only Connect's default SQLite data directory (`/var/lib/rstudio-connect`). If you override `Server.DataDir` (via `--config` or `CONNECT_SERVER_DATADIR`) or point Connect at an external database, `--reset` refuses to run and reports an error rather than silently leaving that state in place. (Start-only mode itself works fine with a custom data directory; only reset is unsupported there.)
+
+#### Detecting a crashed Connect
+
+Because a start-only container stays running under the keep-alive process, a crashed Connect does **not** stop the container. To make crashes visible, start-only containers are given a healthcheck that probes Connect's `/__ping__` endpoint. Check it during a test run:
+
+```bash
+docker inspect --format '{{.State.Health.Status}}' "$CONTAINER_ID"
+# healthy    -> Connect is serving
+# unhealthy  -> Connect stopped responding (e.g. crashed) and did not recover
+```
+
+Nothing auto-restarts Connect, so a crash stays `unhealthy` until the next `--reset`. Assert on `healthy` (rather than container liveness) if a test needs to confirm Connect stayed up.
+
+> Note: the health status is refreshed on the container's healthcheck interval, so immediately after a `--reset` it may briefly lag (reset polls `/__ping__` directly and returns as soon as Connect is serving). For an immediate readiness signal use `/__ping__`; for "did Connect stay up over time" use the health status.
 
 ## GitHub Actions
 
@@ -132,6 +171,7 @@ The GitHub Action supports the following inputs:
 | `env`         | No       |           | Environment variables to pass to Docker container (one per line, format: KEY=VALUE)           |
 | `command`     | No       |           | Command to run against Connect (omit for start-only mode)                                     |
 | `stop`        | No       |           | Container ID to stop (use instead of starting a new container)                                |
+| `reset`       | No       |           | Container ID of a start-only container to reset to its clean baseline (use instead of starting a new container) |
 
 ### GitHub Action Outputs
 

@@ -31,6 +31,9 @@ inputs:
   stop:
     description: 'Container ID to stop (use instead of starting a new container)'
     required: false
+  reset:
+    description: 'Container ID of a start-only container to reset to its clean baseline (use instead of starting a new container)'
+    required: false
 
 outputs:
   CONNECT_API_KEY:
@@ -53,7 +56,11 @@ runs:
       shell: bash
       run: uv tool install ${{ github.action_path }}
 
+    # Only write the license when starting a new container. On stop/reset there is
+    # no license input, and the running container bind-mounts this file as its
+    # license -- rewriting it here would blank that out and break --reset.
     - name: Create license file
+      if: ${{ inputs.stop == '' && inputs.reset == '' }}
       shell: bash
       run: echo "${{ inputs.license }}" > rstudio-connect.lic
 
@@ -64,6 +71,12 @@ runs:
         # Handle stop mode
         if [ -n "${{ inputs.stop }}" ]; then
           with-connect --stop "${{ inputs.stop }}"
+          exit 0
+        fi
+
+        # Handle reset mode
+        if [ -n "${{ inputs.reset }}" ]; then
+          with-connect --reset "${{ inputs.reset }}"
           exit 0
         fi
 

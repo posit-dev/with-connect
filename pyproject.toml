@@ -10,7 +10,9 @@ dependencies = [
 ]
 
 [project.scripts]
-with-connect = "main:main"
+# Target cli, not main: the installed command skips the __main__ block, so cli
+# gives it the same clean error handling as python main.py.
+with-connect = "main:cli"
 
 [tool.setuptools]
 py-modules = ["main"]

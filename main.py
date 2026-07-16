@@ -2,10 +2,12 @@ import argparse
 import base64
 import os
 import re
+import shlex
 import socket
 import subprocess
 import sys
 import time
+import urllib.request
 
 import docker
 from rsconnect.api import RSConnectClient, RSConnectServer
@@ -21,6 +23,40 @@ VERSION = "release"
 # Older versions only exist on the legacy Docker Hub images.
 REGISTRY_CUTOVER_YEAR = 2026
 REGISTRY_CUTOVER_MONTH = 4
+
+# Connect's mutable state directory inside the container (SQLite DB, deployed
+# content, etc.). The license is bind-mounted read-only into it and must be
+# preserved across reset. The clean baseline snapshot is stored outside it so
+# reset's wipe never touches it.
+DATA_DIR = "/var/lib/rstudio-connect"
+LICENSE_FILENAME = "rstudio-connect.lic"
+BASELINE_DIR = "/var/lib/with-connect"
+BASELINE_PATH = f"{BASELINE_DIR}/baseline.tgz"
+
+# In start-only mode, PID 1 is docker-init (added via init=True in main()), which
+# reaps orphaned Connect child processes and forwards signals. It runs a keep-alive
+# `sleep infinity` as its child so Connect can be cycled (for --reset) without
+# stopping the container; Connect itself is launched via `docker exec` using the
+# image's own launch command (see get_connect_launch_command).
+KEEPALIVE_CMD = ["sleep", "infinity"]
+CONNECT_BINARY = "/opt/rstudio-connect/bin/connect"
+
+# Health probe so a crashed Connect is visible via the container's health status
+# even though PID 1 (the keep-alive) keeps the container running. It mirrors the
+# probe the modern image already ships (curl /__ping__ on an interval); we set it
+# ourselves so legacy and other images that lack a healthcheck get it too. Since
+# nothing auto-restarts Connect, a crash stays "unhealthy" until the next reset.
+# Durations are nanoseconds (docker SDK).
+HEALTHCHECK = {
+    "test": [
+        "CMD-SHELL",
+        "curl --fail --silent --output /dev/null http://localhost:3939/__ping__",
+    ],
+    "interval": 10_000_000_000,   # probe every 10s
+    "timeout": 5_000_000_000,     # 5s per probe
+    "retries": 3,                 # 3 consecutive failures -> unhealthy
+    "start_period": 60_000_000_000,  # grace while Connect first boots
+}
 
 
 def parse_args():
@@ -75,6 +111,14 @@ def parse_args():
         const="",  # sentinel for --stop without argument
         metavar="CONTAINER_ID",
         help="Stop a running Connect container by ID (uses CONTAINER_ID env var if not specified)",
+    )
+    parser.add_argument(
+        "--reset",
+        nargs="?",
+        default=None,
+        const="",  # sentinel for --reset without argument
+        metavar="CONTAINER_ID",
+        help="Reset a running start-only Connect container to its clean baseline (uses CONTAINER_ID env var if not specified)",
     )
 
     # Handle -- separator and capture remaining args
@@ -241,18 +285,56 @@ def get_docker_tag(version: str) -> tuple[str, str]:
         return (LEGACY_IMAGE, version)
 
 
+def build_run_kwargs(image_name, port, mounts, container_env, base_image, is_start_only):
+    """Assemble the docker containers.run kwargs.
+
+    Start-only mode adds a keep-alive PID 1 command, a crash-surfacing healthcheck,
+    and init=True; command mode uses the image's default entrypoint. See main().
+    """
+    run_kwargs = {
+        "image": image_name,
+        "detach": True,
+        "tty": True,
+        "stdin_open": True,
+        "privileged": True,
+        "ports": {"3939/tcp": port},
+        "mounts": mounts,
+        "environment": container_env,
+    }
+    if _force_amd64(base_image):
+        run_kwargs["platform"] = "linux/amd64"
+    if is_start_only:
+        # PID 1 is a keep-alive so Connect can be cycled (for --reset) without
+        # stopping the container; Connect itself is launched via exec (see
+        # start_connect). init=True injects docker-init (tini) as PID 1, which
+        # reaps the Connect child processes orphaned on each stop/reset (a bare
+        # sleep PID 1 never reaps) and makes sleep a child that responds to
+        # SIGTERM for a prompt stop. The healthcheck surfaces a crashed Connect
+        # via the container's health status.
+        run_kwargs["command"] = KEEPALIVE_CMD
+        run_kwargs["healthcheck"] = HEALTHCHECK
+        run_kwargs["init"] = True
+    return run_kwargs
+
+
 def main() -> int:
     """
     Main entry point for the with-connect CLI tool.
 
-    Orchestrates the full workflow:
+    --stop and --reset short-circuit to stop or reset an existing container and
+    return. Otherwise the workflow is:
     1. Parse arguments and validate file paths
-    2. Ensure Docker image is available
-    3. Start Connect container with license and optional config
-    4. Wait for Connect to start and validate license
-    5. Bootstrap and retrieve API key
-    6. Execute user command with CONNECT_API_KEY and CONNECT_SERVER set
-    7. Stop container and exit with command's exit code
+    2. Ensure the Docker image is available
+    3. Start the Connect container with the license and optional config
+       (start-only mode runs a keep-alive PID 1 so Connect can be reset in place;
+       command mode uses the image's default entrypoint)
+    4. Wait for Connect to start and validate the license
+    5. Bootstrap and retrieve an API key
+    6. Command mode: run the user command with CONNECT_API_KEY and CONNECT_SERVER
+       set, then stop the container and exit with the command's code
+    7. Start-only mode: capture a clean baseline snapshot for --reset, print the
+       credentials (API key, server URL, container id), and leave the container
+       running
     """
     args = parse_args()
 
@@ -261,14 +343,16 @@ def main() -> int:
         container_id = args.stop or os.environ.get("CONTAINER_ID")
         if not container_id:
             raise RuntimeError("No container ID provided and CONTAINER_ID environment variable not set")
-        client = docker.from_env()
-        try:
-            container = client.containers.get(container_id)
-            container.stop()
-            print(f"Stopped container {container_id}", file=sys.stderr)
-            return 0
-        except docker.errors.NotFound:
-            raise RuntimeError(f"Container not found: {container_id}")
+        stop_container(container_id)
+        return 0
+
+    # Handle --reset mode: reset a start-only container to its clean baseline
+    if args.reset is not None:
+        container_id = args.reset or os.environ.get("CONTAINER_ID")
+        if not container_id:
+            raise RuntimeError("No container ID provided and CONTAINER_ID environment variable not set")
+        reset_container(container_id)
+        return 0
 
     license_path = os.path.abspath(os.path.expanduser(args.license))
     if not os.path.exists(license_path):
@@ -327,24 +411,25 @@ def main() -> int:
                 key, value = env_var.split("=", 1)
                 container_env[key] = value
 
-    run_kwargs = {
-        "image": image_name,
-        "detach": True,
-        "tty": True,
-        "stdin_open": True,
-        "privileged": True,
-        "ports": {"3939/tcp": args.port},
-        "mounts": mounts,
-        "environment": container_env,
-    }
-    if _force_amd64(base_image):
-        run_kwargs["platform"] = "linux/amd64"
+    # Start-only mode (no command after --) launches Connect under a keep-alive
+    # PID 1 so it can be reset in place; command mode keeps the default entrypoint.
+    is_start_only = not args.command
+
+    run_kwargs = build_run_kwargs(
+        image_name, args.port, mounts, container_env, base_image, is_start_only
+    )
     container = client.containers.run(**run_kwargs)
 
     server_url = f"http://localhost:{args.port}"
-    stop_container = True
+    stop_on_exit = True
 
     try:
+        # Inside the try so a start_connect failure (e.g. a custom image with no
+        # launch command) still hits the finally and stops the just-created
+        # container instead of leaking it and holding the port.
+        if is_start_only:
+            start_connect(container)
+
         print(f"Waiting for port {args.port} to open...", file=sys.stderr)
         if not is_port_open("localhost", args.port, timeout=60.0):
             print("\nContainer logs:", file=sys.stderr)
@@ -375,15 +460,22 @@ def main() -> int:
             except subprocess.CalledProcessError as e:
                 exit_code = e.returncode
         else:
-            # Start-only mode: output credentials and keep container running
+            # Start-only mode: capture a clean baseline for --reset, then output
+            # credentials and keep the container running.
+            print("Capturing clean baseline snapshot for --reset...", file=sys.stderr)
+            capture_baseline(container)
+            if not wait_until_healthy("localhost", args.port):
+                print("\nContainer logs:", file=sys.stderr)
+                print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
+                raise RuntimeError("Connect did not become healthy after baseline capture")
             print(f"CONNECT_API_KEY={api_key}")
             print(f"CONNECT_SERVER={server_url}")
             print(f"CONTAINER_ID={container.id}")
-            stop_container = False
+            stop_on_exit = False
 
         return exit_code
     finally:
-        if stop_container:
+        if stop_on_exit:
             container.stop()
 
 
@@ -494,9 +586,238 @@ def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
         raise RuntimeError(f"Failed to bootstrap Connect and retrieve API key: {e}")
 
 
-if __name__ == "__main__":
+def get_connect_launch_command(container) -> list[str]:
+    """Return the command the image uses to launch Connect (Entrypoint + Cmd).
+
+    Derived from the image config so Connect is launched the same way the image
+    would on its own -- covering the modern (startup.sh) and legacy
+    (tini -- startup.sh) Connect images.
+    """
+    config = container.image.attrs.get("Config", {}) or {}
+    entrypoint = config.get("Entrypoint") or []
+    cmd = config.get("Cmd") or []
+    launch = list(entrypoint) + list(cmd)
+    if not launch:
+        raise RuntimeError("Could not determine Connect launch command from image config")
+    return launch
+
+
+def start_connect(container) -> None:
+    """Launch Connect as a managed background child using the image's own launch
+    command, routing output to PID 1's stdout so container.logs() still captures
+    Connect's log stream."""
+    launch = get_connect_launch_command(container)
+    joined = " ".join(shlex.quote(part) for part in launch)
+    container.exec_run(
+        ["bash", "-lc", f"{joined} > /proc/1/fd/1 2>&1"],
+        detach=True,
+    )
+
+
+def get_connect_pid(container):
+    """Return the PID of the running Connect process, or None if not running.
+
+    Raises if ps itself fails, so a broken/absent ps (e.g. a custom image) is not
+    mistaken for 'Connect not running' (which would make stop_connect silently
+    no-op and let reset tar a live database).
+    """
+    code, output = container.exec_run(["ps", "-eo", "pid,args"])
+    text = output.decode("utf-8", errors="replace") if output else ""
+    if code != 0:
+        raise RuntimeError(f"Could not list processes to find Connect (ps exited {code}): {text}")
+    for line in text.splitlines():
+        if CONNECT_BINARY in line:
+            parts = line.split(None, 1)
+            if parts and parts[0].isdigit():
+                return int(parts[0])
+    return None
+
+
+def stop_connect(container, timeout: float = 30.0, poll_interval: float = 0.5) -> None:
+    """Stop the Connect process inside the container: SIGTERM, wait, then SIGKILL."""
+    pid = get_connect_pid(container)
+    if pid is None or pid == 1:
+        # Never signal PID 1: in start-only mode it is the keep-alive that holds
+        # the container open. Killing it would stop the container and defeat the
+        # whole point of resetting in place.
+        return
+    container.exec_run(["kill", "-TERM", str(pid)])
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        code, _ = container.exec_run(["kill", "-0", str(pid)])
+        if code != 0:
+            return
+        time.sleep(poll_interval)
+    container.exec_run(["kill", "-KILL", str(pid)])
+
+
+def has_baseline(container) -> bool:
+    """Whether the container has a captured clean baseline (i.e. was started by
+    with-connect in start-only mode)."""
+    code, _ = container.exec_run(["test", "-f", BASELINE_PATH])
+    return code == 0
+
+
+def connect_data_is_default(container) -> bool:
+    """Whether Connect's SQLite database lives under the default data dir.
+
+    Reset snapshots/restores DATA_DIR, so if Connect was configured with a custom
+    Server.DataDir (or an external database) its data isn't there and a reset
+    would silently do nothing. A SQLite DB under DATA_DIR/db confirms reset can
+    actually work.
+    """
+    code, _ = container.exec_run(["sh", "-lc", f"ls {DATA_DIR}/db/*.db"])
+    return code == 0
+
+
+def discover_host_port(container) -> int:
+    """Return the host port mapped to Connect's container port 3939/tcp."""
+    container.reload()
+    ports = container.attrs.get("NetworkSettings", {}).get("Ports", {}) or {}
+    binding = ports.get("3939/tcp")
+    if not binding:
+        raise RuntimeError("Container has no 3939/tcp port mapping")
+    return int(binding[0]["HostPort"])
+
+
+def wait_until_healthy(
+    host: str, port: int, timeout: float = 60.0, poll_interval: float = 1.0
+) -> bool:
+    """Poll Connect's unauthenticated /__ping__ endpoint until it returns 200."""
+    url = f"http://{host}:{port}/__ping__"
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as resp:
+                if resp.status == 200:
+                    return True
+        except Exception:
+            pass
+        time.sleep(poll_interval)
+    return False
+
+
+def exec_or_raise(container, cmd, message: str):
+    """Run cmd in the container as root; raise RuntimeError with output on failure."""
+    code, output = container.exec_run(cmd, user="root")
+    if code != 0:
+        detail = output.decode("utf-8", errors="replace") if output else ""
+        raise RuntimeError(f"{message}: {detail}")
+    return output
+
+
+def capture_baseline(container) -> None:
+    """Snapshot the clean data dir (excluding the license mount) for later reset.
+
+    Stops Connect first so the SQLite copy is consistent, then restarts it. The
+    caller is responsible for waiting until Connect is healthy again.
+    """
+    stop_connect(container)
+    exec_or_raise(container, ["mkdir", "-p", BASELINE_DIR], "Failed to create baseline dir")
+    exec_or_raise(
+        container,
+        ["tar", "czf", BASELINE_PATH, "-C", DATA_DIR, f"--exclude=./{LICENSE_FILENAME}", "."],
+        "Failed to capture baseline snapshot",
+    )
+    start_connect(container)
+
+
+def restore_baseline(container) -> None:
+    """Wipe the data dir (preserving the license mount) and restore the baseline."""
+    wipe = (
+        f"cd {DATA_DIR} && find . -mindepth 1 "
+        f"-not -path './{LICENSE_FILENAME}' -delete"
+    )
+    exec_or_raise(container, ["bash", "-lc", wipe], "Failed to wipe data dir")
+    exec_or_raise(
+        container, ["tar", "xzf", BASELINE_PATH, "-C", DATA_DIR],
+        "Failed to restore baseline snapshot",
+    )
+
+
+def stop_container(container_id: str) -> None:
+    """Stop a Connect container by id.
+
+    Start-only containers run under a keep-alive PID 1 that ignores SIGTERM, so a
+    plain container.stop() would idle the full ~10s grace period. For those, stop
+    Connect gracefully first, then stop the container promptly.
+    """
+    client = docker.from_env()
+    try:
+        container = client.containers.get(container_id)
+    except docker.errors.NotFound:
+        raise RuntimeError(f"Container not found: {container_id}")
+    container.reload()
+    if container.status == "running" and has_baseline(container):
+        # Best-effort graceful Connect shutdown (flush its SQLite state before the
+        # container is torn down). If listing/signalling Connect fails -- e.g. a
+        # custom image without ps -- still stop the container rather than erroring
+        # out and leaving it running.
+        try:
+            stop_connect(container, timeout=8)
+        except RuntimeError as e:
+            print(f"Warning: could not stop Connect gracefully: {e}", file=sys.stderr)
+        container.stop(timeout=2)
+    else:
+        container.stop()
+    print(f"Stopped container {container_id}", file=sys.stderr)
+
+
+def reset_container(container_id: str) -> None:
+    """Reset a running start-only Connect container to its clean baseline.
+
+    Stops Connect inside the container, restores the pristine data dir, and
+    restarts Connect — without stopping the container. The restored DB holds the
+    same admin API key, so existing credentials keep working.
+    """
+    client = docker.from_env()
+    try:
+        container = client.containers.get(container_id)
+    except docker.errors.NotFound:
+        raise RuntimeError(f"Container not found: {container_id}")
+
+    container.reload()
+    if container.status != "running":
+        raise RuntimeError(f"Container is not running: {container_id}")
+
+    if not has_baseline(container):
+        raise RuntimeError(
+            f"Container {container_id} was not started by with-connect in "
+            "start-only mode, so it has no clean baseline to reset to."
+        )
+
+    if not connect_data_is_default(container):
+        raise RuntimeError(
+            f"Cannot reset container {container_id}: Connect's data is not under the "
+            f"default data directory {DATA_DIR} (a custom Server.DataDir or an external "
+            "database is configured). --reset only supports the default SQLite data "
+            "directory; resetting would silently leave that state in place."
+        )
+
+    port = discover_host_port(container)
+    print(f"Resetting Connect in container {container_id}...", file=sys.stderr)
+    stop_connect(container)
+    restore_baseline(container)
+    start_connect(container)
+
+    if not wait_until_healthy("localhost", port):
+        print("\nContainer logs:", file=sys.stderr)
+        print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
+        raise RuntimeError("Connect did not become healthy after reset")
+
+    print(f"Connect reset and ready at http://localhost:{port}", file=sys.stderr)
+
+
+def cli() -> None:
+    """Console-script entry point. Wraps main so a RuntimeError prints a clean
+    'Error: ...' line with exit code 1 instead of a traceback. The installed
+    command skips the __main__ block, so it must target cli, not main."""
     try:
         sys.exit(main())
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    cli()

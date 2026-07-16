@@ -24,6 +24,8 @@ jobs:
       - name: Run unit tests
         run: uv run test_main.py
 
+  # Command mode on the modern ghcr.io/posit-dev/connect image (default version),
+  # across x86 and arm runners.
   test-action:
     strategy:
       fail-fast: false
@@ -58,6 +60,7 @@ jobs:
             [ "$TEST_STRING" = "This contains single quotes" ] || exit 1
             echo "✓ Multiline test passed - variables, single quotes, and double quotes all work"
 
+  # Legacy image (rstudio/rstudio-connect) start-only + graceful stop.
   test-action-start-only:
     runs-on: ubuntu-latest
     steps:
@@ -67,7 +70,7 @@ jobs:
         id: start-connect
         uses: ./
         with:
-          version: 2024.08.0
+          version: 2024.08.0  # legacy rstudio/rstudio-connect image
           license: ${{ secrets.CONNECT_LICENSE }}
 
       - name: Verify outputs are set
@@ -112,6 +115,72 @@ jobs:
         env:
           CONTAINER_ID: ${{ steps.start-connect.outputs.CONTAINER_ID }}
 
+  # Full --reset cycle (dirty -> reset -> pristine + same key) on BOTH the modern
+  # ghcr.io/posit-dev/connect image and the legacy rstudio/rstudio-connect image.
+  test-action-reset:
+    name: test-action-reset (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - version: "release"     # modern ghcr.io/posit-dev/connect image
+            label: modern
+          - version: "2024.08.0"   # legacy rstudio/rstudio-connect image
+            label: legacy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Start Connect (start-only)
+        id: start
+        uses: ./
+        with:
+          version: ${{ matrix.version }}
+          license: ${{ secrets.CONNECT_LICENSE }}
+
+      - name: Deploy content to dirty the instance
+        run: |
+          set -euo pipefail
+          curl -f -s -X POST "$CONNECT_SERVER/__api__/v1/content" \
+            -H "Authorization: Key $CONNECT_API_KEY" \
+            -H 'Content-Type: application/json' \
+            -d '{"name":"ci-reset-test","title":"CI Reset Test"}' > /dev/null
+          COUNT=$(curl -f -s -H "Authorization: Key $CONNECT_API_KEY" "$CONNECT_SERVER/__api__/v1/content" \
+            | python3 -c 'import sys, json; print(len(json.load(sys.stdin)))')
+          echo "Content count after deploy: $COUNT"
+          [ "$COUNT" = "1" ] || { echo "ERROR: expected 1 content item"; exit 1; }
+          echo "✓ Instance dirtied with one content item"
+        env:
+          CONNECT_API_KEY: ${{ steps.start.outputs.CONNECT_API_KEY }}
+          CONNECT_SERVER: ${{ steps.start.outputs.CONNECT_SERVER }}
+
+      - name: Reset Connect
+        uses: ./
+        with:
+          reset: ${{ steps.start.outputs.CONTAINER_ID }}
+
+      - name: Verify pristine state with the same API key
+        run: |
+          set -euo pipefail
+          RESPONSE=$(curl -f -H "Authorization: Key $CONNECT_API_KEY" "$CONNECT_SERVER/__api__/v1/content")
+          echo "Content after reset: $RESPONSE"
+          [ "$RESPONSE" = "[]" ] || { echo "ERROR: content should be wiped after reset"; exit 1; }
+          if ! docker ps -q --filter "id=$CONTAINER_ID" | grep -q .; then
+            echo "ERROR: container should still be running after reset"
+            exit 1
+          fi
+          echo "✓ Reset produced a clean Connect, kept the same API key, and left the container running"
+        env:
+          CONNECT_API_KEY: ${{ steps.start.outputs.CONNECT_API_KEY }}
+          CONNECT_SERVER: ${{ steps.start.outputs.CONNECT_SERVER }}
+          CONTAINER_ID: ${{ steps.start.outputs.CONTAINER_ID }}
+
+      - name: Stop Connect
+        uses: ./
+        with:
+          stop: ${{ steps.start.outputs.CONTAINER_ID }}
+
+  # CLI command mode on the legacy rstudio/rstudio-connect image.
   test-cli:
     runs-on: ubuntu-latest
     steps:
