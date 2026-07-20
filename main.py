@@ -24,10 +24,13 @@ VERSION = "release"
 REGISTRY_CUTOVER_YEAR = 2026
 REGISTRY_CUTOVER_MONTH = 4
 
-# Connect's mutable state directory inside the container (SQLite DB, deployed
-# content, etc.). The license is bind-mounted read-only into it and must be
-# preserved across reset. The clean baseline snapshot is stored outside it so
-# reset's wipe never touches it.
+# Connect's default mutable state directory (SQLite DB, deployed content, etc.).
+# An image or config can move it (the legacy image defaults to /data), so reset
+# resolves the effective directory at runtime via get_data_dir and only falls
+# back to this default. The license is bind-mounted read-only into the default
+# location and is preserved across reset when it lives inside the data dir. The
+# clean baseline snapshot is stored outside any data dir so reset's wipe never
+# touches it.
 DATA_DIR = "/var/lib/rstudio-connect"
 LICENSE_FILENAME = "rstudio-connect.lic"
 BASELINE_DIR = "/var/lib/with-connect"
@@ -463,7 +466,14 @@ def main() -> int:
             # Start-only mode: capture a clean baseline for --reset, then output
             # credentials and keep the container running.
             print("Capturing clean baseline snapshot for --reset...", file=sys.stderr)
-            capture_baseline(container)
+            data_dir = resolve_real_path(container, get_data_dir(container))
+            if data_dir_overlaps_baseline(container, data_dir):
+                raise RuntimeError(
+                    f"Connect's data directory {data_dir} is, or contains, "
+                    f"{BASELINE_DIR}, the internal baseline storage location. "
+                    "Choose a Server.DataDir that doesn't overlap it."
+                )
+            capture_baseline(container, data_dir)
             if not wait_until_healthy("localhost", args.port):
                 print("\nContainer logs:", file=sys.stderr)
                 print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
@@ -658,16 +668,47 @@ def has_baseline(container) -> bool:
     return code == 0
 
 
-def connect_data_is_default(container) -> bool:
-    """Whether Connect's SQLite database lives under the default data dir.
+def data_dir_has_sqlite_db(container, data_dir: str) -> bool:
+    """Whether Connect's built-in SQLite database lives under data_dir.
 
-    Reset snapshots/restores DATA_DIR, so if Connect was configured with a custom
-    Server.DataDir (or an external database) its data isn't there and a reset
-    would silently do nothing. A SQLite DB under DATA_DIR/db confirms reset can
-    actually work.
+    Reset snapshots and restores the data dir as files, so it can only reset the
+    built-in SQLite database. If Connect points at an external database there is
+    no SQLite db under data_dir/db, and a file-level restore would leave that
+    state untouched -- so reset refuses instead of silently no-opping.
     """
-    code, _ = container.exec_run(["sh", "-lc", f"ls {DATA_DIR}/db/*.db"])
+    code, _ = container.exec_run(["sh", "-lc", f"ls {shlex.quote(data_dir)}/db/*.db"])
     return code == 0
+
+
+def data_dir_contains_baseline_dir(data_dir: str, baseline_dir: str = BASELINE_DIR) -> bool:
+    """Whether wiping data_dir would touch baseline_dir: a pure path comparison.
+
+    restore_baseline's wipe deletes everything under data_dir. If data_dir is
+    baseline_dir itself or an ancestor of it (e.g. a custom Server.DataDir set
+    to /var/lib), the wipe would destroy the baseline archive the restore step
+    is about to extract, along with anything else under that ancestor.
+
+    See data_dir_overlaps_baseline for the container-aware caller, which
+    checks this against both BASELINE_DIR's literal path and its real target.
+    """
+    baseline = os.path.normpath(baseline_dir)
+    data = os.path.normpath(data_dir)
+    return os.path.commonpath([baseline, data]) == data
+
+
+def data_dir_overlaps_baseline(container, data_dir: str) -> bool:
+    """Whether wiping data_dir (already resolved -- see resolve_real_path)
+    would touch BASELINE_DIR in either sense that matters.
+
+    Checks BASELINE_DIR's literal path -- deleting just its directory entry,
+    e.g. if it's itself a symlink pointing elsewhere, still breaks every
+    subsequent reference built from the literal BASELINE_PATH constant -- and
+    its resolved real target, in case BASELINE_DIR is a symlink into a
+    location data_dir would otherwise destroy for real.
+    """
+    return data_dir_contains_baseline_dir(data_dir, BASELINE_DIR) or data_dir_contains_baseline_dir(
+        data_dir, resolve_real_path(container, BASELINE_DIR)
+    )
 
 
 def discover_host_port(container) -> int:
@@ -706,7 +747,43 @@ def exec_or_raise(container, cmd, message: str):
     return output
 
 
-def capture_baseline(container) -> None:
+def get_data_dir(container) -> str:
+    """Resolve Connect's effective data directory from its startup log.
+
+    Connect logs `Using data directory: <path>` on boot, reflecting the effective
+    value whatever its source -- the image's gcfg default, a --config override, or
+    a CONNECT_SERVER_DATADIR env var. That lets reset work on the modern image
+    (/var/lib/rstudio-connect) and older images that default elsewhere (/data)
+    alike, without parsing config. But that directory only logs as "Using" if it
+    already exists on disk (true for both images' built-in defaults, which are
+    created at image-build time); a directory that doesn't yet exist -- e.g. a
+    custom Server.DataDir/CONNECT_SERVER_DATADIR pointed at a fresh path -- logs
+    "Creating data directory: <path>" on its first boot instead, which the regex
+    must also match or it silently falls back to the wrong default and captures
+    an empty baseline. A container accumulates one line per boot (one from
+    bootstrap, one per reset), so use the most recent; fall back to the default
+    if no line is present at all.
+    """
+    # "Creating" is logged on the directory's first-ever boot; every boot
+    # after that (bootstrap restarts, resets) logs "Using" for the same path.
+    logs = container.logs().decode("utf-8", errors="replace")
+    matches = re.findall(r"(?:Using|Creating) data directory: ([^\"\n]+)", logs)
+    return matches[-1].strip() if matches else DATA_DIR
+
+
+def resolve_real_path(container, path: str) -> str:
+    """Resolve path to its real, symlink-free form inside the container.
+
+    data_dir_contains_baseline_dir compares paths lexically; if Server.DataDir
+    were a symlink into BASELINE_DIR (or an ancestor of it), that comparison
+    would miss the overlap even though the shell commands in capture_baseline
+    and restore_baseline would still follow the symlink and touch it for real.
+    """
+    output = exec_or_raise(container, ["readlink", "-f", path], f"Failed to resolve real path of {path}")
+    return output.decode("utf-8", errors="replace").strip()
+
+
+def capture_baseline(container, data_dir: str) -> None:
     """Snapshot the clean data dir (excluding the license mount) for later reset.
 
     Stops Connect first so the SQLite copy is consistent, then restarts it. The
@@ -716,21 +793,21 @@ def capture_baseline(container) -> None:
     exec_or_raise(container, ["mkdir", "-p", BASELINE_DIR], "Failed to create baseline dir")
     exec_or_raise(
         container,
-        ["tar", "czf", BASELINE_PATH, "-C", DATA_DIR, f"--exclude=./{LICENSE_FILENAME}", "."],
+        ["tar", "czf", BASELINE_PATH, "-C", data_dir, f"--exclude=./{LICENSE_FILENAME}", "."],
         "Failed to capture baseline snapshot",
     )
     start_connect(container)
 
 
-def restore_baseline(container) -> None:
+def restore_baseline(container, data_dir: str) -> None:
     """Wipe the data dir (preserving the license mount) and restore the baseline."""
     wipe = (
-        f"cd {DATA_DIR} && find . -mindepth 1 "
+        f"cd {shlex.quote(data_dir)} && find . -mindepth 1 "
         f"-not -path './{LICENSE_FILENAME}' -delete"
     )
     exec_or_raise(container, ["bash", "-lc", wipe], "Failed to wipe data dir")
     exec_or_raise(
-        container, ["tar", "xzf", BASELINE_PATH, "-C", DATA_DIR],
+        container, ["tar", "xzf", BASELINE_PATH, "-C", data_dir],
         "Failed to restore baseline snapshot",
     )
 
@@ -786,18 +863,24 @@ def reset_container(container_id: str) -> None:
             "start-only mode, so it has no clean baseline to reset to."
         )
 
-    if not connect_data_is_default(container):
+    data_dir = resolve_real_path(container, get_data_dir(container))
+    if not data_dir_has_sqlite_db(container, data_dir):
         raise RuntimeError(
-            f"Cannot reset container {container_id}: Connect's data is not under the "
-            f"default data directory {DATA_DIR} (a custom Server.DataDir or an external "
-            "database is configured). --reset only supports the default SQLite data "
-            "directory; resetting would silently leave that state in place."
+            f"Cannot reset container {container_id}: no SQLite database under Connect's "
+            f"data directory {data_dir} (an external database is configured). --reset only "
+            "restores the built-in SQLite database; resetting would leave that state in place."
+        )
+    if data_dir_overlaps_baseline(container, data_dir):
+        raise RuntimeError(
+            f"Cannot reset container {container_id}: Connect's data directory {data_dir} "
+            f"is, or contains, {BASELINE_DIR}, the internal baseline storage location. "
+            "Wiping data_dir would delete the baseline archive needed to restore it."
         )
 
     port = discover_host_port(container)
     print(f"Resetting Connect in container {container_id}...", file=sys.stderr)
     stop_connect(container)
-    restore_baseline(container)
+    restore_baseline(container, data_dir)
     start_connect(container)
 
     if not wait_until_healthy("localhost", port):

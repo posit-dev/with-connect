@@ -115,8 +115,7 @@ jobs:
         env:
           CONTAINER_ID: ${{ steps.start-connect.outputs.CONTAINER_ID }}
 
-  # Full --reset cycle (dirty -> reset -> pristine + same key) on BOTH the modern
-  # ghcr.io/posit-dev/connect image and the legacy rstudio/rstudio-connect image.
+  # Full --reset cycle (dirty -> reset -> pristine + same key).
   test-action-reset:
     name: test-action-reset (${{ matrix.label }})
     strategy:
@@ -127,6 +126,8 @@ jobs:
             label: modern
           - version: "2024.08.0"   # legacy rstudio/rstudio-connect image
             label: legacy
+          - version: "2022.10.0"   # README's documented minimum (bionic image)
+            label: legacy-minimum
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
@@ -179,6 +180,46 @@ jobs:
         uses: ./
         with:
           stop: ${{ steps.start.outputs.CONTAINER_ID }}
+
+  # --reset must refuse (not silently no-op) when Connect points at an external
+  # database, against a live Postgres-backed Connect rather than a mock.
+  test-reset-external-db:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Create license file
+        run: echo "${{ secrets.CONNECT_LICENSE }}" > rstudio-connect.lic
+
+      - name: Run external-database reset test
+        run: |
+          CONNECT_LICENSE_FILE=rstudio-connect.lic \
+            uv run --with pytest pytest test_integration.py -k test_reset_refuses_external_database -v
+
+  # --reset must work against a custom Server.DataDir path that doesn't already
+  # exist in the image (Connect logs "Creating", not "Using", the first time).
+  test-reset-custom-datadir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+
+      - name: Create license file
+        run: echo "${{ secrets.CONNECT_LICENSE }}" > rstudio-connect.lic
+
+      - name: Run custom-DataDir reset test
+        run: |
+          CONNECT_LICENSE_FILE=rstudio-connect.lic \
+            uv run --with pytest pytest test_integration.py -k test_reset_works_with_custom_datadir -v
 
   # CLI command mode on the legacy rstudio/rstudio-connect image.
   test-cli:

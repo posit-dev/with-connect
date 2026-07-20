@@ -134,7 +134,7 @@ with-connect --stop "$CONTAINER_ID"
 
 Reset is fast (usually a few seconds) because it never restarts the container, re-pulls the image, or re-bootstraps. Under the hood, start-only containers run Connect under a keep-alive process so Connect can be cycled in place; the reset restores a snapshot of the data directory captured right after bootstrap. Reset only applies to start-only containers (command mode containers are ephemeral).
 
-`--reset` supports only Connect's default SQLite data directory (`/var/lib/rstudio-connect`). If you override `Server.DataDir` (via `--config` or `CONNECT_SERVER_DATADIR`) or point Connect at an external database, `--reset` refuses to run and reports an error rather than silently leaving that state in place. (Start-only mode itself works fine with a custom data directory; only reset is unsupported there.)
+`--reset` resolves Connect's effective data directory at runtime (from its startup log), so it works with the default location (`/var/lib/rstudio-connect`), a custom `Server.DataDir` (via `--config` or `CONNECT_SERVER_DATADIR`), and older images that default elsewhere (e.g. `/data`). It restores Connect's built-in SQLite database, so if Connect is pointed at an external database `--reset` refuses to run and reports an error rather than silently leaving that state in place.
 
 #### Detecting a crashed Connect
 

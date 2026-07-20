@@ -399,10 +399,11 @@ def test_discover_host_port_missing():
 def test_restore_baseline_wipes_and_extracts():
     c = MagicMock()
     c.exec_run.return_value = (0, b"")
-    main.restore_baseline(c)
+    main.restore_baseline(c, main.DATA_DIR)
     cmds = [call.args[0] for call in c.exec_run.call_args_list]
     # First: bash wipe that deletes everything except the license bind-mount
     assert cmds[0][0] == "bash"
+    assert main.DATA_DIR in cmds[0][2]
     assert f"-not -path './{main.LICENSE_FILENAME}'" in cmds[0][2]
     assert "-delete" in cmds[0][2]
     # Second: extract the baseline archive into the data dir
@@ -410,11 +411,22 @@ def test_restore_baseline_wipes_and_extracts():
     assert cmds[1][-1] == main.DATA_DIR
 
 
+def test_restore_baseline_targets_resolved_data_dir():
+    """The wipe and extract operate on the data dir passed in, not a hard-coded
+    default -- so a legacy image's /data is reset, not the empty default dir."""
+    c = MagicMock()
+    c.exec_run.return_value = (0, b"")
+    main.restore_baseline(c, "/data")
+    cmds = [call.args[0] for call in c.exec_run.call_args_list]
+    assert "/data" in cmds[0][2] and "-delete" in cmds[0][2]
+    assert cmds[1][-1] == "/data"
+
+
 def test_restore_baseline_raises_on_tar_failure():
     c = MagicMock()
     c.exec_run.side_effect = [(0, b""), (2, b"tar: broken")]
     try:
-        main.restore_baseline(c)
+        main.restore_baseline(c, main.DATA_DIR)
         assert False, "expected RuntimeError"
     except RuntimeError as e:
         assert "restore baseline" in str(e).lower()
@@ -424,7 +436,7 @@ def test_restore_baseline_raises_on_wipe_failure():
     c = MagicMock()
     c.exec_run.side_effect = [(1, b"find: permission denied")]  # wipe fails first
     try:
-        main.restore_baseline(c)
+        main.restore_baseline(c, main.DATA_DIR)
         assert False, "expected RuntimeError"
     except RuntimeError as e:
         assert "wipe data dir" in str(e).lower()
@@ -469,12 +481,14 @@ def test_capture_baseline_snapshots_excluding_license():
     c = MagicMock()
     c.exec_run.return_value = (0, b"")
     c.image.attrs = {"Config": {"Entrypoint": None, "Cmd": ["/usr/local/bin/startup.sh"]}}
-    main.capture_baseline(c)
+    main.capture_baseline(c, main.DATA_DIR)
     cmds = [call.args[0] for call in c.exec_run.call_args_list]
     tar_cmds = [cmd for cmd in cmds if cmd and cmd[0] == "tar" and "czf" in cmd]
     assert tar_cmds, "expected a tar czf command"
     tar = tar_cmds[0]
     assert main.BASELINE_PATH in tar
+    # The snapshot is taken from the resolved data dir (-C <data_dir>).
+    assert tar[tar.index("-C") + 1] == main.DATA_DIR
     # The license bind-mount must be excluded from the snapshot, or tar would
     # read the license through the mount into the archive.
     assert f"--exclude=./{main.LICENSE_FILENAME}" in tar
@@ -486,10 +500,58 @@ def test_capture_baseline_raises_on_tar_failure():
     # stop_connect ps (no connect), mkdir, then tar czf fails
     c.exec_run.side_effect = [(0, b""), (0, b""), (2, b"tar: broken")]
     try:
-        main.capture_baseline(c)
+        main.capture_baseline(c, main.DATA_DIR)
         assert False, "expected RuntimeError"
     except RuntimeError as e:
         assert "capture baseline" in str(e).lower()
+
+
+def test_get_data_dir_uses_most_recent_log_line():
+    """Resolves Connect's effective data dir from its startup log, taking the
+    latest line (a container accumulates one per boot / reset)."""
+    c = MagicMock()
+    c.logs.return_value = (
+        b'time="..." level=info msg="Using data directory: /var/lib/rstudio-connect"\n'
+        b'time="..." level=info msg="Using data directory: /data"\n'
+    )
+    assert main.get_data_dir(c) == "/data"
+
+
+def test_get_data_dir_falls_back_to_default():
+    c = MagicMock()
+    c.logs.return_value = b"no data directory line logged here"
+    assert main.get_data_dir(c) == main.DATA_DIR
+
+
+def test_get_data_dir_matches_creating_on_first_boot():
+    """A directory that doesn't already exist on disk (e.g. a custom
+    Server.DataDir/CONNECT_SERVER_DATADIR pointed at a fresh path) logs
+    "Creating data directory: <path>" on its first boot, not "Using" -- the
+    built-in default dirs only log "Using" because they're pre-created in the
+    image. Missing this would silently fall back to DATA_DIR and capture an
+    empty baseline from the wrong directory."""
+    c = MagicMock()
+    c.logs.return_value = (
+        b'time="..." level=info msg="Creating data directory: /custom-data-dir"\n'
+    )
+    assert main.get_data_dir(c) == "/custom-data-dir"
+
+
+def test_resolve_real_path_follows_symlink():
+    c = MagicMock()
+    c.exec_run.return_value = (0, b"/var/lib/with-connect\n")
+    assert main.resolve_real_path(c, "/mydata") == "/var/lib/with-connect"
+    c.exec_run.assert_called_once_with(["readlink", "-f", "/mydata"], user="root")
+
+
+def test_resolve_real_path_raises_on_failure():
+    c = MagicMock()
+    c.exec_run.return_value = (1, b"readlink: /mydata: No such file or directory")
+    try:
+        main.resolve_real_path(c, "/mydata")
+        assert False, "expected RuntimeError"
+    except RuntimeError as e:
+        assert "resolve real path" in str(e).lower()
 
 
 def test_stop_container_graceful_for_start_only():
@@ -554,19 +616,22 @@ def test_reset_container_no_baseline_raises():
             assert "start-only mode" in str(e)
 
 
-def test_reset_container_custom_datadir_raises():
-    """Reset must fail loudly (not silently no-op) when Connect's data is not under
-    the default data dir, e.g. a custom Server.DataDir."""
+def test_reset_container_external_db_raises():
+    """Reset must fail loudly (not silently no-op) when the resolved data dir has
+    no built-in SQLite database -- i.e. Connect points at an external database."""
     from unittest.mock import patch
 
     mock_container = MagicMock()
     mock_container.status = "running"
+    mock_container.logs.return_value = b'msg="Using data directory: /var/lib/rstudio-connect"'
 
     def fake_exec(cmd, **kwargs):
         joined = " ".join(cmd) if isinstance(cmd, list) else cmd
+        if cmd[:2] == ["readlink", "-f"]:  # resolve_real_path -> echo input unchanged
+            return (0, (cmd[2] + "\n").encode())
         if "baseline.tgz" in joined:   # has_baseline -> True
             return (0, b"")
-        if "/db/" in joined:           # connect_data_is_default -> False (no SQLite db)
+        if "/db/" in joined:           # data_dir_has_sqlite_db -> False (external DB)
             return (2, b"ls: no such file or directory")
         return (0, b"")
 
@@ -578,13 +643,242 @@ def test_reset_container_custom_datadir_raises():
             main.reset_container("abc123")
             assert False, "expected RuntimeError"
         except RuntimeError as e:
-            assert "data directory" in str(e).lower()
+            assert "external database" in str(e).lower()
     # It must bail before mutating: the data-dir wipe (restore_baseline) never ran.
     cmds = [
         " ".join(c.args[0]) if isinstance(c.args[0], list) else str(c.args[0])
         for c in mock_container.exec_run.call_args_list
     ]
     assert not any("-delete" in c for c in cmds), "must not wipe the data dir when the guard fires"
+
+
+def test_data_dir_contains_baseline_dir():
+    assert main.data_dir_contains_baseline_dir(main.BASELINE_DIR) is True
+    assert main.data_dir_contains_baseline_dir("/var/lib") is True
+    # The root dir is an ancestor of everything, including BASELINE_DIR -- a
+    # naive `baseline.startswith(data + "/")` check turns this into
+    # `startswith("//")`, which never matches, so this case regressed once.
+    assert main.data_dir_contains_baseline_dir("/") is True
+    assert main.data_dir_contains_baseline_dir(main.DATA_DIR) is False
+    assert main.data_dir_contains_baseline_dir("/data") is False
+    # Must not falsely match on a raw string prefix without a path separator:
+    # "/var/lib/with-connect-other" is a sibling, not an ancestor of BASELINE_DIR.
+    assert main.data_dir_contains_baseline_dir(main.BASELINE_DIR + "-other") is False
+
+
+def test_data_dir_overlaps_baseline_checks_literal_and_resolved():
+    """data_dir_overlaps_baseline must catch an overlap via EITHER BASELINE_DIR's
+    literal path or its resolved real target, since either one being deleted
+    is unsafe (the literal path breaks our own subsequent references; the
+    resolved target is where the archive's actual bytes live)."""
+    def readlink_returns(target):
+        c = MagicMock()
+        c.exec_run.return_value = (0, (target + "\n").encode())
+        return c
+
+    # Resolved target overlaps data_dir, even though the literal path doesn't.
+    assert main.data_dir_overlaps_baseline(readlink_returns("/data/with-connect"), "/data") is True
+    # Literal path overlaps data_dir, even though the resolved target doesn't.
+    assert main.data_dir_overlaps_baseline(readlink_returns("/opt/with-connect"), "/var/lib") is True
+    # Neither overlaps.
+    assert main.data_dir_overlaps_baseline(readlink_returns(main.BASELINE_DIR), "/data") is False
+
+
+def test_reset_container_baseline_dir_overlap_raises():
+    """Reset must fail loudly (not silently no-op, and not wipe anything) when
+    the resolved data dir is or contains BASELINE_DIR -- e.g. a custom
+    Server.DataDir set to /var/lib -- since the wipe would delete the baseline
+    archive the restore step needs, along with anything else under it."""
+    from unittest.mock import patch
+
+    mock_container = MagicMock()
+    mock_container.status = "running"
+    mock_container.logs.return_value = b'msg="Using data directory: /var/lib"'
+
+    def fake_exec(cmd, **kwargs):
+        joined = " ".join(cmd) if isinstance(cmd, list) else cmd
+        if cmd[:2] == ["readlink", "-f"]:  # resolve_real_path -> echo input unchanged
+            return (0, (cmd[2] + "\n").encode())
+        if "baseline.tgz" in joined:  # has_baseline -> True
+            return (0, b"")
+        if "/db/" in joined:          # data_dir_has_sqlite_db -> True
+            return (0, b"/var/lib/db/connect.db\n")
+        return (0, b"")
+
+    mock_container.exec_run.side_effect = fake_exec
+    mock_client = MagicMock()
+    mock_client.containers.get.return_value = mock_container
+    with patch.object(main.docker, "from_env", return_value=mock_client):
+        try:
+            main.reset_container("abc123")
+            assert False, "expected RuntimeError"
+        except RuntimeError as e:
+            assert main.BASELINE_DIR in str(e)
+    cmds = [
+        " ".join(c.args[0]) if isinstance(c.args[0], list) else str(c.args[0])
+        for c in mock_container.exec_run.call_args_list
+    ]
+    assert not any("-delete" in c for c in cmds), "must not wipe the data dir when the guard fires"
+
+
+def test_reset_container_symlinked_datadir_overlap_raises():
+    """The overlap guard must catch a Server.DataDir that's a symlink into
+    BASELINE_DIR, not just a lexical match -- resolve_real_path follows the
+    symlink before data_dir_contains_baseline_dir compares paths."""
+    from unittest.mock import patch
+
+    mock_container = MagicMock()
+    mock_container.status = "running"
+    mock_container.logs.return_value = b'msg="Using data directory: /mydata"'
+
+    def fake_exec(cmd, **kwargs):
+        joined = " ".join(cmd) if isinstance(cmd, list) else cmd
+        if cmd[:2] == ["readlink", "-f"]:  # /mydata is a symlink into BASELINE_DIR
+            return (0, b"/var/lib/with-connect\n")
+        if "baseline.tgz" in joined:  # has_baseline -> True
+            return (0, b"")
+        if "/db/" in joined:          # data_dir_has_sqlite_db -> True
+            return (0, b"/var/lib/with-connect/db/connect.db\n")
+        return (0, b"")
+
+    mock_container.exec_run.side_effect = fake_exec
+    mock_client = MagicMock()
+    mock_client.containers.get.return_value = mock_container
+    with patch.object(main.docker, "from_env", return_value=mock_client):
+        try:
+            main.reset_container("abc123")
+            assert False, "expected RuntimeError"
+        except RuntimeError as e:
+            assert main.BASELINE_DIR in str(e)
+    cmds = [
+        " ".join(c.args[0]) if isinstance(c.args[0], list) else str(c.args[0])
+        for c in mock_container.exec_run.call_args_list
+    ]
+    assert not any("-delete" in c for c in cmds), "must not wipe the data dir when the guard fires"
+
+
+def test_reset_container_symlinked_baseline_dir_overlap_raises():
+    """The overlap guard must also resolve BASELINE_DIR itself, not just
+    data_dir -- if BASELINE_DIR is a symlink (e.g. because /var/lib is
+    symlinked on a read-only-root image), comparing data_dir against the
+    unresolved BASELINE_DIR constant would miss an overlap that only exists
+    through the symlink's real target."""
+    from unittest.mock import patch
+
+    mock_container = MagicMock()
+    mock_container.status = "running"
+    mock_container.logs.return_value = b'msg="Using data directory: /data"'
+
+    def fake_exec(cmd, **kwargs):
+        joined = " ".join(cmd) if isinstance(cmd, list) else cmd
+        if cmd[:2] == ["readlink", "-f"]:
+            if cmd[2] == main.BASELINE_DIR:
+                # BASELINE_DIR is a symlink whose real target lives under /data.
+                return (0, b"/data/with-connect\n")
+            return (0, (cmd[2] + "\n").encode())  # data_dir itself isn't a symlink
+        if "baseline.tgz" in joined:  # has_baseline -> True
+            return (0, b"")
+        if "/db/" in joined:          # data_dir_has_sqlite_db -> True
+            return (0, b"/data/db/connect.db\n")
+        return (0, b"")
+
+    mock_container.exec_run.side_effect = fake_exec
+    mock_client = MagicMock()
+    mock_client.containers.get.return_value = mock_container
+    with patch.object(main.docker, "from_env", return_value=mock_client):
+        try:
+            main.reset_container("abc123")
+            assert False, "expected RuntimeError"
+        except RuntimeError as e:
+            assert main.BASELINE_DIR in str(e)
+    cmds = [
+        " ".join(c.args[0]) if isinstance(c.args[0], list) else str(c.args[0])
+        for c in mock_container.exec_run.call_args_list
+    ]
+    assert not any("-delete" in c for c in cmds), "must not wipe the data dir when the guard fires"
+
+
+def test_reset_container_literal_baseline_dir_overlap_raises():
+    """The overlap guard must also catch data_dir overlapping BASELINE_DIR's
+    LITERAL path even when BASELINE_DIR resolves elsewhere -- e.g. BASELINE_DIR
+    is itself a symlink pointing outside data_dir. Wiping data_dir would still
+    delete that symlink's directory entry (not its target's contents), which
+    breaks every subsequent reference built from the literal BASELINE_PATH
+    constant, even though the archive's real bytes survive. A resolved-only
+    comparison would miss this, since the resolved target doesn't overlap."""
+    from unittest.mock import patch
+
+    mock_container = MagicMock()
+    mock_container.status = "running"
+    mock_container.logs.return_value = b'msg="Using data directory: /var/lib"'
+
+    def fake_exec(cmd, **kwargs):
+        joined = " ".join(cmd) if isinstance(cmd, list) else cmd
+        if cmd[:2] == ["readlink", "-f"]:
+            if cmd[2] == main.BASELINE_DIR:
+                # BASELINE_DIR is a symlink resolving OUTSIDE data_dir.
+                return (0, b"/opt/with-connect\n")
+            return (0, (cmd[2] + "\n").encode())  # data_dir itself isn't a symlink
+        if "baseline.tgz" in joined:  # has_baseline -> True
+            return (0, b"")
+        if "/db/" in joined:          # data_dir_has_sqlite_db -> True
+            return (0, b"/var/lib/db/connect.db\n")
+        return (0, b"")
+
+    mock_container.exec_run.side_effect = fake_exec
+    mock_client = MagicMock()
+    mock_client.containers.get.return_value = mock_container
+    with patch.object(main.docker, "from_env", return_value=mock_client):
+        try:
+            main.reset_container("abc123")
+            assert False, "expected RuntimeError"
+        except RuntimeError as e:
+            assert main.BASELINE_DIR in str(e)
+    cmds = [
+        " ".join(c.args[0]) if isinstance(c.args[0], list) else str(c.args[0])
+        for c in mock_container.exec_run.call_args_list
+    ]
+    assert not any("-delete" in c for c in cmds), "must not wipe the data dir when the guard fires"
+
+
+def test_reset_container_resets_resolved_data_dir():
+    """Reset resolves the effective data dir (e.g. the legacy image's /data) and
+    wipes/restores THAT dir, not the hard-coded default."""
+    from unittest.mock import patch
+
+    mock_container = MagicMock()
+    mock_container.status = "running"
+    mock_container.logs.return_value = b'msg="Using data directory: /data"'
+    mock_container.image.attrs = {
+        "Config": {"Entrypoint": None, "Cmd": ["/usr/local/bin/startup.sh"]}
+    }
+
+    def fake_exec(cmd, **kwargs):
+        joined = " ".join(cmd) if isinstance(cmd, list) else cmd
+        if cmd[:2] == ["readlink", "-f"]:  # resolve_real_path -> echo input unchanged
+            return (0, (cmd[2] + "\n").encode())
+        if "test -f" in joined and "baseline.tgz" in joined:  # has_baseline -> True
+            return (0, b"")
+        if "/db/*.db" in joined:                              # has SQLite db -> True
+            return (0, b"/data/db/connect.db\n")
+        if "ps -eo" in joined:                                # get_connect_pid -> none running
+            return (0, b"  PID ARGS\n1 sleep infinity\n")
+        return (0, b"")  # wipe, tar restore, start_connect all succeed
+
+    mock_container.exec_run.side_effect = fake_exec
+    mock_client = MagicMock()
+    mock_client.containers.get.return_value = mock_container
+    with patch.object(main.docker, "from_env", return_value=mock_client), \
+            patch.object(main, "discover_host_port", return_value=3939), \
+            patch.object(main, "wait_until_healthy", return_value=True):
+        main.reset_container("abc123")
+    cmds = [
+        " ".join(c.args[0]) if isinstance(c.args[0], list) else str(c.args[0])
+        for c in mock_container.exec_run.call_args_list
+    ]
+    # The wipe targets /data, and the baseline is extracted back into /data.
+    assert any("/data" in c and "-delete" in c for c in cmds), cmds
+    assert any("-C /data" in c for c in cmds), cmds
 
 
 def test_reset_container_not_running_raises():
