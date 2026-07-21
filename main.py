@@ -36,7 +36,7 @@ LICENSE_FILENAME = "rstudio-connect.lic"
 BASELINE_DIR = "/var/lib/with-connect"
 BASELINE_PATH = f"{BASELINE_DIR}/baseline.tgz"
 
-# In start-only mode, PID 1 is docker-init (added via init=True in main()), which
+# In start-only mode, PID 1 is docker-init (added via init=True in run()), which
 # reaps orphaned Connect child processes and forwards signals. It runs a keep-alive
 # `sleep infinity` as its child so Connect can be cycled (for --reset) without
 # stopping the container; Connect itself is launched via `docker exec` using the
@@ -292,7 +292,7 @@ def build_run_kwargs(image_name, port, mounts, container_env, base_image, is_sta
     """Assemble the docker containers.run kwargs.
 
     Start-only mode adds a keep-alive PID 1 command, a crash-surfacing healthcheck,
-    and init=True; command mode uses the image's default entrypoint. See main().
+    and init=True; command mode uses the image's default entrypoint. See run().
     """
     run_kwargs = {
         "image": image_name,
@@ -320,9 +320,9 @@ def build_run_kwargs(image_name, port, mounts, container_env, base_image, is_sta
     return run_kwargs
 
 
-def main() -> int:
+def run() -> int:
     """
-    Main entry point for the with-connect CLI tool.
+    Core logic for the with-connect CLI tool.
 
     --stop and --reset short-circuit to stop or reset an existing container and
     return. Otherwise the workflow is:
@@ -891,16 +891,18 @@ def reset_container(container_id: str) -> None:
     print(f"Connect reset and ready at http://localhost:{port}", file=sys.stderr)
 
 
-def cli() -> None:
-    """Console-script entry point. Wraps main so a RuntimeError prints a clean
-    'Error: ...' line with exit code 1 instead of a traceback. The installed
-    command skips the __main__ block, so it must target cli, not main."""
+def main() -> None:
+    """Console-script entry point (see pyproject.toml's [project.scripts]) and
+    __main__ target. Wraps run() so a RuntimeError prints a clean 'Error: ...'
+    line with exit code 1 instead of a traceback. Installed console scripts
+    call this function directly and never go through the __main__ block below,
+    so the error handling has to live here rather than in that block."""
     try:
-        sys.exit(main())
+        sys.exit(run())
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    cli()
+    main()

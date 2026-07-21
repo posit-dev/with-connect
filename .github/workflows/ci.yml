@@ -24,8 +24,6 @@ jobs:
       - name: Run unit tests
         run: uv run test_main.py
 
-  # Command mode on the modern ghcr.io/posit-dev/connect image (default version),
-  # across x86 and arm runners.
   test-action:
     strategy:
       fail-fast: false
@@ -60,7 +58,6 @@ jobs:
             [ "$TEST_STRING" = "This contains single quotes" ] || exit 1
             echo "✓ Multiline test passed - variables, single quotes, and double quotes all work"
 
-  # Legacy image (rstudio/rstudio-connect) start-only + graceful stop.
   test-action-start-only:
     runs-on: ubuntu-latest
     steps:

@@ -922,7 +922,7 @@ def test_cli_reports_runtime_error_without_traceback():
     result = subprocess.run(
         [sys.executable, "-c",
          "import sys; sys.argv=['with-connect','--reset','nonexistent_cli_test']; "
-         "import main; main.cli()"],
+         "import main; main.main()"],
         capture_output=True, text=True,
     )
     assert result.returncode == 1
