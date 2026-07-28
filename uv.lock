@@ -65,16 +65,16 @@ wheels = [
 
 [[package]]
 name = "docker"
-version = "7.1.0"
+version = "7.2.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "pywin32", marker = "sys_platform == 'win32'" },
     { name = "requests" },
     { name = "urllib3" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/91/9b/4a2ea29aeba62471211598dac5d96825bb49348fa07e906ea930394a83ce/docker-7.1.0.tar.gz", hash = "sha256:ad8c70e6e3f8926cb8a92619b832b4ea5299e2831c14284663184e200546fa6c", size = 117834, upload-time = "2024-05-23T11:13:57.216Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/88/7f/731ff914b0255d3d065f45fd4e626d4b8c95dbcbaada049f337a6ac16410/docker-7.2.0.tar.gz", hash = "sha256:cebb93773d334f778e023a7ee352a8d6e13ab1bd3b863a4d4a59dec897df43ac", size = 118731, upload-time = "2026-07-09T14:53:46.39Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/e3/26/57c6fb270950d476074c087527a558ccb6f4436657314bfb6cdf484114c4/docker-7.1.0-py3-none-any.whl", hash = "sha256:c96b93b7f0a746f9e77d325bcfb87422a3d8bd4f03136ae8a85b37f1898d5fc0", size = 147774, upload-time = "2024-05-23T11:13:55.01Z" },
+    { url = "https://files.pythonhosted.org/packages/75/23/529140fe1aab80fc6992f93a706deec709140a6397439139a054e1515c45/docker-7.2.0-py3-none-any.whl", hash = "sha256:a3f45fdeb9165e2d25d9a1d02ddf3bc70fb572cf5ebbf9b58558c22caf29b71f", size = 148775, upload-time = "2026-07-09T14:53:45.224Z" },
 ]
 
 [[package]]
@@ -84,6 +84,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/f1/70/7703c29685631f5a7590aa73f1f1d3fa9a380e654b86af429e0934a32f7d/idna-3.10.tar.gz", hash = "sha256:12f65c9b470abda6dc35cf8e63cc574b1c52b11df2c86030af0ac09b01b13ea9", size = 190490, upload-time = "2024-09-15T18:07:39.745Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/76/c6/c88e154df9c4e1a2a66ccf0005a88dfb2650c1dffb6f5ce603dfbd452ce3/idna-3.10-py3-none-any.whl", hash = "sha256:946d195a0d259cbba61165e88e65941f16e9b36ea6ddb97f00452bae8b1287d3", size = 70442, upload-time = "2024-09-15T18:07:37.964Z" },
+]
+
+[[package]]
+name = "packaging"
+version = "26.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/d7/f1/e7a6dd94a8d4a5626c03e4e99c87f241ba9e350cd9e6d75123f992427270/packaging-26.2.tar.gz", hash = "sha256:ff452ff5a3e828ce110190feff1178bb1f2ea2281fa2075aadb987c2fb221661", size = 228134, upload-time = "2026-04-24T20:15:23.917Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/b2/87e62e8c3e2f4b32e5fe99e0b86d576da1312593b39f47d8ceef365e95ed/packaging-26.2-py3-none-any.whl", hash = "sha256:5fc45236b9446107ff2415ce77c807cee2862cb6fac22b8a73826d0693b0980e", size = 100195, upload-time = "2026-04-24T20:15:22.081Z" },
 ]
 
 [[package]]
@@ -134,18 +143,20 @@ wheels = [
 
 [[package]]
 name = "rsconnect"
-version = "1.29.0"
+version = "1.30.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
+    { name = "packaging" },
     { name = "pip" },
     { name = "pyjwt" },
     { name = "semver" },
     { name = "typing-extensions" },
     { name = "uv" },
 ]
+sdist = { url = "https://files.pythonhosted.org/packages/82/39/80c47418b0ca6924f9fc9d3ba783189921ffb96a1215418e2f4c34a4ff87/rsconnect-1.30.0.tar.gz", hash = "sha256:daa4811aafe3607cf4074407b239724b951f10da36356b4e1e2138dd8dd4390f", size = 148042, upload-time = "2026-07-16T10:40:16.326Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/57/36/c5dbf592afc8127390edeaa5f342a1e4f7fccce04ed1b50552181e651015/rsconnect-1.29.0-py2.py3-none-any.whl", hash = "sha256:69d480fe8d87ee281c9d986c85d342b95e4952cbf0dd942cc2a42172dc036a62", size = 116832, upload-time = "2026-04-29T19:10:39.903Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/c3/d5bd294d38ee8be53c81270054acee4036b80f8922dd9cdad3b8206dd9be/rsconnect-1.30.0-py3-none-any.whl", hash = "sha256:7c750393254af11c572e58690bba2dd9bd889d2a4e0c34e1ef98f029d5bbeca2", size = 170388, upload-time = "2026-07-16T10:40:14.87Z" },
 ]
 
 [[package]]
@@ -212,6 +223,6 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "docker", specifier = ">=7.1.0" },
-    { name = "rsconnect", specifier = ">=1.29.0" },
+    { name = "docker", specifier = ">=7.2.0" },
+    { name = "rsconnect", specifier = ">=1.30.0" },
 ]
