@@ -2,7 +2,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 
 import docker
 import main
@@ -265,6 +265,61 @@ def test_stop_argument_in_help():
     assert "CONTAINER_ID" in result.stdout
 
 
+def run_cli(*args):
+    return subprocess.run(
+        [sys.executable, "main.py", *args],
+        capture_output=True,
+        text=True,
+    )
+
+
+def parse_with_argv(*args):
+    with patch.object(sys, "argv", ["with-connect", *args]):
+        return main.parse_args()
+
+
+def test_subcommand_gives_clear_error():
+    result = run_cli("start")
+
+    assert result.returncode == 2
+    assert "no subcommands" in result.stderr
+
+
+def test_unknown_flag_uses_default_error():
+    result = run_cli("--json")
+
+    assert result.returncode == 2
+    assert "unrecognized arguments: --json" in result.stderr
+    assert "no subcommands" not in result.stderr
+
+
+def test_subcommand_followed_by_flag_gives_clear_error():
+    result = run_cli("start", "--json")
+
+    assert result.returncode == 2
+    assert "unexpected argument 'start'" in result.stderr
+    assert "no subcommands" in result.stderr
+
+
+def test_unknown_flag_with_value_blames_the_flag():
+    result = run_cli("--name", "foo")
+
+    assert result.returncode == 2
+    assert "unrecognized arguments: --name foo" in result.stderr
+    assert "no subcommands" not in result.stderr
+
+
+def test_command_after_separator_is_not_a_subcommand():
+    args = parse_with_argv("--port", "4000", "--", "start", "--json")
+
+    assert args.port == 4000
+    assert args.command == ["start", "--json"]
+
+
+def test_no_command_without_separator():
+    assert parse_with_argv("--quiet").command == []
+
+
 def test_stop_nonexistent_container():
     """Test that --stop with nonexistent container returns error."""
     result = subprocess.run(
@@ -349,6 +404,24 @@ if __name__ == "__main__":
 
     test_stop_argument_in_help()
     print("✓ test_stop_argument_in_help passed")
+
+    test_subcommand_gives_clear_error()
+    print("✓ test_subcommand_gives_clear_error passed")
+
+    test_unknown_flag_uses_default_error()
+    print("✓ test_unknown_flag_uses_default_error passed")
+
+    test_subcommand_followed_by_flag_gives_clear_error()
+    print("✓ test_subcommand_followed_by_flag_gives_clear_error passed")
+
+    test_unknown_flag_with_value_blames_the_flag()
+    print("✓ test_unknown_flag_with_value_blames_the_flag passed")
+
+    test_command_after_separator_is_not_a_subcommand()
+    print("✓ test_command_after_separator_is_not_a_subcommand passed")
+
+    test_no_command_without_separator()
+    print("✓ test_no_command_without_separator passed")
 
     test_stop_nonexistent_container()
     print("✓ test_stop_nonexistent_container passed")

@@ -22,6 +22,22 @@ VERSION = "release"
 REGISTRY_CUTOVER_YEAR = 2026
 REGISTRY_CUTOVER_MONTH = 4
 
+DESCRIPTION = """\
+Starts Posit Connect in Docker and waits until it is ready.
+
+With no command, prints CONNECT_API_KEY, CONNECT_SERVER and CONTAINER_ID
+as KEY=value lines on stdout and leaves the container running.
+Progress and errors go to stderr.
+
+With "-- COMMAND", runs COMMAND with CONNECT_API_KEY and CONNECT_SERVER
+set, then stops the container and exits with the command's exit code."""
+
+EPILOG = """\
+examples:
+  with-connect --license ./rstudio-connect.lic
+  with-connect --license ./rstudio-connect.lic -- bash -c 'curl -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
+"""
+
 
 def parse_args():
     """
@@ -31,7 +47,9 @@ def parse_args():
     and the command to run against Connect.
     """
     parser = argparse.ArgumentParser(
-        description="Run Posit Connect with optional command execution"
+        description=DESCRIPTION,
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version",
@@ -45,7 +63,7 @@ def parse_args():
     )
     parser.add_argument(
         "--image",
-        help="Container image to use, including tag (overrides --version)",
+        help="Container image to use, including tag (use instead of --version)",
     )
     parser.add_argument(
         "--config", help="Path to rstudio-connect.gcfg configuration file"
@@ -66,7 +84,7 @@ def parse_args():
         "--port",
         type=int,
         default=3939,
-        help="Port to map the Connect container to (default: 3939)",
+        help="Port to map the Connect container to (default: 3939, 0 is not supported)",
     )
     parser.add_argument(
         "--stop",
@@ -86,7 +104,15 @@ def parse_args():
         main_args = sys.argv[1:]
         command_args = []
 
-    args = parser.parse_args(main_args)
+    args, unknown = parser.parse_known_args(main_args)
+    if unknown and unknown[0].startswith("-"):
+        parser.error(f"unrecognized arguments: {' '.join(unknown)}")
+    if unknown:
+        parser.error(
+            f"unexpected argument '{unknown[0]}', with-connect has no subcommands. "
+            "Run with-connect with no command to start Connect, "
+            "or put a command after '--'."
+        )
     args.command = command_args
     return args
 

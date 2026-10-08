@@ -102,7 +102,8 @@ with-connect --license ./rstudio-connect.lic
 You can eval the output to set the variables in your shell:
 
 ```bash
-eval $(with-connect --license ./rstudio-connect.lic)
+eval "$(with-connect --license ./rstudio-connect.lic)"
+export CONNECT_API_KEY CONNECT_SERVER CONTAINER_ID
 curl -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content
 
 # Stop Connect when done (--stop without argument uses $CONTAINER_ID)
