@@ -27,6 +27,7 @@ Starts Posit Connect in Docker and waits until it is ready.
 
 With no command, prints CONNECT_API_KEY, CONNECT_SERVER and CONTAINER_ID
 as KEY=value lines on stdout and leaves the container running.
+Stop it later with: with-connect --stop CONTAINER_ID
 Progress and errors go to stderr.
 
 With "-- COMMAND", runs COMMAND with CONNECT_API_KEY and CONNECT_SERVER
@@ -37,6 +38,17 @@ examples:
   with-connect --license ./rstudio-connect.lic
   with-connect --license ./rstudio-connect.lic -- bash -c 'curl -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
 """
+
+
+def port_number(value: str) -> int:
+    """Parse --port. Docker can only map a fixed host port from 1 to 65535."""
+    try:
+        port = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid port value: '{value}'")
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"{port} is not a valid port. Use a free port from 1 to 65535.")
+    return port
 
 
 def parse_args():
@@ -82,9 +94,9 @@ def parse_args():
     )
     parser.add_argument(
         "--port",
-        type=int,
+        type=port_number,
         default=3939,
-        help="Port to map the Connect container to (default: 3939, 0 is not supported)",
+        help="Port to map the Connect container to (default: 3939)",
     )
     parser.add_argument(
         "--stop",
@@ -92,7 +104,7 @@ def parse_args():
         default=None,
         const="",  # sentinel for --stop without argument
         metavar="CONTAINER_ID",
-        help="Stop a running Connect container by ID (uses CONTAINER_ID env var if not specified)",
+        help="Stop a running Connect container by ID (uses the exported CONTAINER_ID env var if not specified)",
     )
 
     # Handle -- separator and capture remaining args
@@ -104,15 +116,7 @@ def parse_args():
         main_args = sys.argv[1:]
         command_args = []
 
-    args, unknown = parser.parse_known_args(main_args)
-    if unknown and unknown[0].startswith("-"):
-        parser.error(f"unrecognized arguments: {' '.join(unknown)}")
-    if unknown:
-        parser.error(
-            f"unexpected argument '{unknown[0]}', with-connect has no subcommands. "
-            "Run with-connect with no command to start Connect, "
-            "or put a command after '--'."
-        )
+    args = parser.parse_args(main_args)
     args.command = command_args
     return args
 

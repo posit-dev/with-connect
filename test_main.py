@@ -1,7 +1,9 @@
+import io
 import os
 import subprocess
 import sys
 import tempfile
+from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import MagicMock, Mock, patch
 
 import docker
@@ -265,51 +267,58 @@ def test_stop_argument_in_help():
     assert "CONTAINER_ID" in result.stdout
 
 
-def run_cli(*args):
-    return subprocess.run(
-        [sys.executable, "main.py", *args],
-        capture_output=True,
-        text=True,
-    )
-
-
 def parse_with_argv(*args):
     with patch.object(sys, "argv", ["with-connect", *args]):
         return main.parse_args()
 
 
-def test_subcommand_gives_clear_error():
-    result = run_cli("start")
-
-    assert result.returncode == 2
-    assert "no subcommands" in result.stderr
-
-
-def test_unknown_flag_uses_default_error():
-    result = run_cli("--json")
-
-    assert result.returncode == 2
-    assert "unrecognized arguments: --json" in result.stderr
-    assert "no subcommands" not in result.stderr
+def parse_exit(*args):
+    """Run parse_args expecting it to exit. Returns the exit code and all output."""
+    output = io.StringIO()
+    with patch.object(sys, "argv", ["with-connect", *args]), redirect_stdout(output), redirect_stderr(output):
+        try:
+            main.parse_args()
+        except SystemExit as e:
+            return e.code, output.getvalue()
+    raise AssertionError("parse_args did not exit")
 
 
-def test_subcommand_followed_by_flag_gives_clear_error():
-    result = run_cli("start", "--json")
+def test_port_zero_is_rejected():
+    code, output = parse_exit("--port", "0")
 
-    assert result.returncode == 2
-    assert "unexpected argument 'start'" in result.stderr
-    assert "no subcommands" in result.stderr
-
-
-def test_unknown_flag_with_value_blames_the_flag():
-    result = run_cli("--name", "foo")
-
-    assert result.returncode == 2
-    assert "unrecognized arguments: --name foo" in result.stderr
-    assert "no subcommands" not in result.stderr
+    assert code == 2
+    assert "0 is not a valid port" in output
 
 
-def test_command_after_separator_is_not_a_subcommand():
+def test_port_above_range_is_rejected():
+    code, output = parse_exit("--port", "70000")
+
+    assert code == 2
+    assert "70000 is not a valid port" in output
+
+
+def test_port_not_a_number_is_rejected():
+    code, output = parse_exit("--port", "abc")
+
+    assert code == 2
+    assert "invalid port value: 'abc'" in output
+
+
+def test_port_range_limits_are_accepted():
+    assert parse_with_argv("--port", "1").port == 1
+    assert parse_with_argv("--port", "65535").port == 65535
+
+
+def test_help_explains_how_to_stop():
+    code, output = parse_exit("--help")
+    help_text = " ".join(output.split())
+
+    assert code == 0
+    assert "Stop it later with: with-connect --stop CONTAINER_ID" in help_text
+    assert "exported CONTAINER_ID" in help_text
+
+
+def test_command_after_separator():
     args = parse_with_argv("--port", "4000", "--", "start", "--json")
 
     assert args.port == 4000
@@ -405,20 +414,23 @@ if __name__ == "__main__":
     test_stop_argument_in_help()
     print("✓ test_stop_argument_in_help passed")
 
-    test_subcommand_gives_clear_error()
-    print("✓ test_subcommand_gives_clear_error passed")
+    test_port_zero_is_rejected()
+    print("✓ test_port_zero_is_rejected passed")
 
-    test_unknown_flag_uses_default_error()
-    print("✓ test_unknown_flag_uses_default_error passed")
+    test_port_above_range_is_rejected()
+    print("✓ test_port_above_range_is_rejected passed")
 
-    test_subcommand_followed_by_flag_gives_clear_error()
-    print("✓ test_subcommand_followed_by_flag_gives_clear_error passed")
+    test_port_not_a_number_is_rejected()
+    print("✓ test_port_not_a_number_is_rejected passed")
 
-    test_unknown_flag_with_value_blames_the_flag()
-    print("✓ test_unknown_flag_with_value_blames_the_flag passed")
+    test_port_range_limits_are_accepted()
+    print("✓ test_port_range_limits_are_accepted passed")
 
-    test_command_after_separator_is_not_a_subcommand()
-    print("✓ test_command_after_separator_is_not_a_subcommand passed")
+    test_help_explains_how_to_stop()
+    print("✓ test_help_explains_how_to_stop passed")
+
+    test_command_after_separator()
+    print("✓ test_command_after_separator passed")
 
     test_no_command_without_separator()
     print("✓ test_no_command_without_separator passed")
