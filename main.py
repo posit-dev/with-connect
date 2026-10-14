@@ -22,6 +22,34 @@ VERSION = "release"
 REGISTRY_CUTOVER_YEAR = 2026
 REGISTRY_CUTOVER_MONTH = 4
 
+DESCRIPTION = """\
+Starts Posit Connect in Docker and waits until it is ready.
+
+With no command, prints CONNECT_API_KEY, CONNECT_SERVER and CONTAINER_ID
+as KEY=value lines on stdout and leaves the container running.
+Stop it later with: with-connect --stop CONTAINER_ID
+Progress and errors go to stderr.
+
+With "-- COMMAND", runs COMMAND with CONNECT_API_KEY and CONNECT_SERVER
+set, then stops the container and exits with the command's exit code."""
+
+EPILOG = """\
+examples:
+  with-connect --license ./rstudio-connect.lic
+  with-connect --license ./rstudio-connect.lic -- bash -c 'curl -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
+"""
+
+
+def port_number(value: str) -> int:
+    """Parse --port. Docker can only map a fixed host port from 1 to 65535."""
+    try:
+        port = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid port value: '{value}'")
+    if not 1 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"{port} is not a valid port. Use a free port from 1 to 65535.")
+    return port
+
 
 def parse_args():
     """
@@ -31,7 +59,9 @@ def parse_args():
     and the command to run against Connect.
     """
     parser = argparse.ArgumentParser(
-        description="Run Posit Connect with optional command execution"
+        description=DESCRIPTION,
+        epilog=EPILOG,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "--version",
@@ -45,7 +75,7 @@ def parse_args():
     )
     parser.add_argument(
         "--image",
-        help="Container image to use, including tag (overrides --version)",
+        help="Container image to use, including tag (use instead of --version)",
     )
     parser.add_argument(
         "--config", help="Path to rstudio-connect.gcfg configuration file"
@@ -64,7 +94,7 @@ def parse_args():
     )
     parser.add_argument(
         "--port",
-        type=int,
+        type=port_number,
         default=3939,
         help="Port to map the Connect container to (default: 3939)",
     )
@@ -74,7 +104,7 @@ def parse_args():
         default=None,
         const="",  # sentinel for --stop without argument
         metavar="CONTAINER_ID",
-        help="Stop a running Connect container by ID (uses CONTAINER_ID env var if not specified)",
+        help="Stop a running Connect container by ID (uses the exported CONTAINER_ID env var if not specified)",
     )
 
     # Handle -- separator and capture remaining args
