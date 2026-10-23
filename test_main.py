@@ -8,6 +8,7 @@ import urllib.error
 import subprocess
 import sys
 import tempfile
+import tomllib
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import MagicMock, Mock, patch
 
@@ -621,6 +622,89 @@ def test_post_bootstrap_raises_on_other_errors():
     assert urlopen.call_count == 1
 
 
+
+def run_main_with_client(client):
+    """Run main() against a mock Docker client, expecting a RuntimeError."""
+    with tempfile.NamedTemporaryFile(suffix=".lic") as license_file:
+        argv = ["with-connect", "--license", license_file.name, "--quiet"]
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(main.docker, "from_env", return_value=client),
+            patch.object(main, "ensure_image"),
+        ):
+            try:
+                main.main()
+            except RuntimeError as e:
+                return str(e)
+    raise AssertionError("Expected RuntimeError")
+
+
+def test_container_create_error_is_reported():
+    errors = [
+        docker.errors.APIError("400 Client Error: Bad Request (invalid mount config)"),
+        requests.exceptions.ReadTimeout("Read timed out. (read timeout=60)"),
+    ]
+    for error in errors:
+        client = MagicMock()
+        client.containers.create.side_effect = error
+
+        message = run_main_with_client(client)
+
+        assert "Failed to create container from" in message
+        assert str(error) in message
+
+
+def test_container_start_error_removes_container():
+    error = docker.errors.APIError("500 Server Error: port is already allocated")
+    client = MagicMock()
+    container = client.containers.create.return_value
+    container.start.side_effect = error
+
+    message = run_main_with_client(client)
+
+    assert "Failed to start container from" in message
+    assert str(error) in message
+    container.remove.assert_called_once_with(force=True)
+
+
+def test_container_start_error_survives_failed_cleanup():
+    client = MagicMock()
+    container = client.containers.create.return_value
+    container.start.side_effect = docker.errors.APIError("port is already allocated")
+    container.remove.side_effect = docker.errors.APIError("removal failed")
+
+    message = run_main_with_client(client)
+
+    assert "port is already allocated" in message
+
+
+def test_docker_unreachable_is_reported():
+    error = docker.errors.DockerException("Error while fetching server API version")
+    with patch.object(main.docker, "from_env", side_effect=error):
+        try:
+            main.docker_client()
+            assert False, "Expected RuntimeError"
+        except RuntimeError as e:
+            assert "Could not connect to Docker" in str(e)
+            assert str(error) in str(e)
+
+
+def test_cli_prints_short_error():
+    output = io.StringIO()
+    with patch.object(main, "main", side_effect=RuntimeError("boom")), redirect_stderr(output):
+        try:
+            main.cli()
+            assert False, "Expected SystemExit"
+        except SystemExit as e:
+            assert e.code == 1
+    assert output.getvalue() == "Error: boom\n"
+
+
+def test_installed_command_uses_cli():
+    with open(os.path.join(os.path.dirname(__file__), "pyproject.toml"), "rb") as f:
+        scripts = tomllib.load(f)["project"]["scripts"]
+    assert scripts["with-connect"] == "main:cli"
+
 if __name__ == "__main__":
     test_license_file_not_exists()
     print("✓ test_license_file_not_exists passed")
@@ -777,5 +861,23 @@ if __name__ == "__main__":
 
     test_post_bootstrap_raises_on_other_errors()
     print("✓ test_post_bootstrap_raises_on_other_errors passed")
+
+    test_container_create_error_is_reported()
+    print("✓ test_container_create_error_is_reported passed")
+
+    test_container_start_error_removes_container()
+    print("✓ test_container_start_error_removes_container passed")
+
+    test_container_start_error_survives_failed_cleanup()
+    print("✓ test_container_start_error_survives_failed_cleanup passed")
+
+    test_docker_unreachable_is_reported()
+    print("✓ test_docker_unreachable_is_reported passed")
+
+    test_cli_prints_short_error()
+    print("✓ test_cli_prints_short_error passed")
+
+    test_installed_command_uses_cli()
+    print("✓ test_installed_command_uses_cli passed")
 
     print("\nAll tests passed!")

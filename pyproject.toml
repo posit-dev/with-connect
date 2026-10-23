@@ -9,7 +9,7 @@ dependencies = [
 ]
 
 [project.scripts]
-with-connect = "main:main"
+with-connect = "main:cli"
 
 [tool.setuptools]
 py-modules = ["main"]
