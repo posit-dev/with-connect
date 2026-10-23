@@ -1,5 +1,10 @@
+import base64
+import hashlib
+import hmac
 import io
+import json
 import os
+import urllib.error
 import subprocess
 import sys
 import tempfile
@@ -341,6 +346,73 @@ def test_stop_nonexistent_container():
     assert "Container not found" in result.stderr
 
 
+def _decode_segment(segment):
+    return json.loads(base64.urlsafe_b64decode(segment + "=" * (-len(segment) % 4)))
+
+
+def test_make_bootstrap_jwt():
+    secret = os.urandom(32)
+    token = main.make_bootstrap_jwt(secret, now=1000)
+    header, claims, signature = token.split(".")
+    assert _decode_segment(header) == {"alg": "HS256", "typ": "JWT"}
+    # Connect rejects the token unless iss, aud, and scope match exactly
+    assert _decode_segment(claims) == {
+        "iss": "rsconnect-python",
+        "aud": "rsconnect",
+        "scope": "bootstrap",
+        "iat": 1000,
+        "exp": 1900,
+    }
+    expected = hmac.new(secret, f"{header}.{claims}".encode(), hashlib.sha256).digest()
+    assert signature == base64.urlsafe_b64encode(expected).rstrip(b"=").decode()
+    assert "=" not in token
+
+
+def _http_error(url, code, body=b""):
+    return urllib.error.HTTPError(url, code, "error", {}, io.BytesIO(body))
+
+
+def test_post_bootstrap_uses_v1():
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = b'{"api_key": "abc"}'
+    with patch("urllib.request.urlopen", return_value=response) as urlopen:
+        assert main.post_bootstrap("http://localhost:3939", "tok") == {"api_key": "abc"}
+    request = urlopen.call_args.args[0]
+    assert request.full_url == "http://localhost:3939/__api__/v1/bootstrap"
+    assert request.get_method() == "POST"
+    assert request.get_header("Authorization") == "Connect-Bootstrap tok"
+
+
+def test_post_bootstrap_falls_back_to_experimental():
+    response = MagicMock()
+    response.__enter__.return_value.read.return_value = b'{"api_key": "abc"}'
+    with patch(
+        "urllib.request.urlopen",
+        side_effect=[_http_error("u", 404), response],
+    ) as urlopen:
+        assert main.post_bootstrap("http://localhost:3939", "tok") == {"api_key": "abc"}
+    urls = [call.args[0].full_url for call in urlopen.call_args_list]
+    assert urls == [
+        "http://localhost:3939/__api__/v1/bootstrap",
+        "http://localhost:3939/__api__/v1/experimental/bootstrap",
+    ]
+
+
+def test_post_bootstrap_raises_on_other_errors():
+    with patch(
+        "urllib.request.urlopen",
+        side_effect=_http_error("u", 401, b'{"error": "invalid jwt"}'),
+    ) as urlopen:
+        try:
+            main.post_bootstrap("http://localhost:3939", "tok")
+            assert False, "Expected RuntimeError"
+        except RuntimeError as e:
+            assert "401" in str(e)
+            assert "invalid jwt" in str(e)
+    # A non-404 error should not trigger the experimental fallback
+    assert urlopen.call_count == 1
+
+
 if __name__ == "__main__":
     test_license_file_not_exists()
     print("✓ test_license_file_not_exists passed")
@@ -437,5 +509,17 @@ if __name__ == "__main__":
 
     test_stop_nonexistent_container()
     print("✓ test_stop_nonexistent_container passed")
+
+    test_make_bootstrap_jwt()
+    print("✓ test_make_bootstrap_jwt passed")
+
+    test_post_bootstrap_uses_v1()
+    print("✓ test_post_bootstrap_uses_v1 passed")
+
+    test_post_bootstrap_falls_back_to_experimental()
+    print("✓ test_post_bootstrap_falls_back_to_experimental passed")
+
+    test_post_bootstrap_raises_on_other_errors()
+    print("✓ test_post_bootstrap_raises_on_other_errors passed")
 
     print("\nAll tests passed!")
