@@ -90,6 +90,114 @@ def test_valid_license_http_server_starts():
     mock_container.stop.assert_not_called()
 
 
+def test_startup_logs_are_streamed_to_stderr():
+    mock_container = MagicMock()
+    mock_container.logs.side_effect = [
+        b"Starting Posit Connect v2025.09.0\nLoading conf",
+        b"Starting Posit Connect v2025.09.0\nLoading config\n",
+        b"Starting Posit Connect v2025.09.0\nLoading config\nStarting HTTP server on [::]:3939\n",
+    ]
+    stdout, stderr = io.StringIO(), io.StringIO()
+    startup_logs = main.ContainerLogs(mock_container)
+
+    with redirect_stdout(stdout), redirect_stderr(stderr):
+        result = main.wait_for_http_server(
+            mock_container, timeout=1.0, poll_interval=0.01, startup_logs=startup_logs
+        )
+
+    assert result is True
+    assert stdout.getvalue() == ""
+    # Each line appears once, a partial line waits until it is complete,
+    # and the version line is still reported
+    assert stderr.getvalue() == (
+        "Starting Posit Connect v2025.09.0\n"
+        "Running Posit Connect v2025.09.0\n"
+        "Loading config\n"
+        "Starting HTTP server on [::]:3939\n"
+    )
+
+
+def test_startup_logs_quiet():
+    mock_container = MagicMock()
+    mock_container.logs.return_value = b"Starting Posit Connect v2025.09.0\nStarting HTTP server on [::]:3939\n"
+    stderr = io.StringIO()
+
+    with redirect_stderr(stderr):
+        result = main.wait_for_http_server(
+            mock_container,
+            timeout=1.0,
+            poll_interval=0.01,
+            startup_logs=main.ContainerLogs(mock_container, quiet=True),
+        )
+
+    assert result is True
+    assert stderr.getvalue() == "Running Posit Connect v2025.09.0\n"
+
+
+def test_invalid_license_logs_not_duplicated():
+    mock_container = MagicMock()
+    mock_container.logs.return_value = b'Starting Posit Connect v2025.09.0\nlevel=warning msg="Unable to obtain a valid license"\n'
+    stderr = io.StringIO()
+
+    with redirect_stderr(stderr):
+        try:
+            main.wait_for_http_server(
+                mock_container,
+                timeout=1.0,
+                poll_interval=0.01,
+                startup_logs=main.ContainerLogs(mock_container),
+            )
+            assert False, "Expected RuntimeError to be raised"
+        except RuntimeError as e:
+            assert "Unable to obtain a valid license" in str(e)
+
+    output = stderr.getvalue()
+    assert output.count("Unable to obtain a valid license") == 1
+    assert output.count("Starting Posit Connect") == 1
+    assert "Container logs" not in output
+
+
+def test_invalid_license_quiet_dumps_logs():
+    mock_container = MagicMock()
+    mock_container.logs.return_value = b'level=warning msg="Unable to obtain a valid license"'
+    stderr = io.StringIO()
+
+    with redirect_stderr(stderr):
+        try:
+            main.wait_for_http_server(mock_container, timeout=1.0, poll_interval=0.01)
+            assert False, "Expected RuntimeError to be raised"
+        except RuntimeError:
+            pass
+
+    assert stderr.getvalue() == '\nContainer logs:\nlevel=warning msg="Unable to obtain a valid license"\n'
+
+
+def test_container_logs_dump_prints_only_unseen_lines():
+    mock_container = MagicMock()
+    mock_container.logs.side_effect = [b"one\ntw", b"one\ntwo\nthree\n"]
+    startup_logs = main.ContainerLogs(mock_container)
+    stderr = io.StringIO()
+
+    with redirect_stderr(stderr):
+        startup_logs.poll()
+        startup_logs.dump()
+
+    assert stderr.getvalue() == "one\n\nContainer logs (continued):\ntwo\nthree\n"
+
+
+def test_container_logs_dump_prints_nothing_when_all_shown():
+    mock_container = MagicMock()
+    mock_container.logs.return_value = b"one\ntwo\n"
+    startup_logs = main.ContainerLogs(mock_container)
+    stderr = io.StringIO()
+
+    with redirect_stderr(stderr):
+        startup_logs.poll()
+        startup_logs.dump()
+
+    assert stderr.getvalue() == "one\ntwo\n"
+
+
 def test_get_docker_tag_latest():
     assert main.get_docker_tag("latest") == ("ghcr.io/posit-dev/connect", "latest")
 
@@ -636,6 +744,24 @@ if __name__ == "__main__":
 
     test_valid_license_http_server_starts()
     print("✓ test_valid_license_http_server_starts passed")
+
+    test_startup_logs_are_streamed_to_stderr()
+    print("✓ test_startup_logs_are_streamed_to_stderr passed")
+
+    test_startup_logs_quiet()
+    print("✓ test_startup_logs_quiet passed")
+
+    test_invalid_license_logs_not_duplicated()
+    print("✓ test_invalid_license_logs_not_duplicated passed")
+
+    test_invalid_license_quiet_dumps_logs()
+    print("✓ test_invalid_license_quiet_dumps_logs passed")
+
+    test_container_logs_dump_prints_only_unseen_lines()
+    print("✓ test_container_logs_dump_prints_only_unseen_lines passed")
+
+    test_container_logs_dump_prints_nothing_when_all_shown()
+    print("✓ test_container_logs_dump_prints_nothing_when_all_shown passed")
 
     test_image_and_version_exclusive()
     print("✓ test_image_and_version_exclusive passed")

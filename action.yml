@@ -15,7 +15,7 @@ inputs:
     description: 'Container image to use for Posit Connect'
     required: false
   quiet:
-    description: 'Suppress progress indicators during image pull'
+    description: 'Suppress image pull progress and the Connect logs shown while Connect starts'
     required: false
     default: 'false'
   port:

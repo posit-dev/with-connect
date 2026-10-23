@@ -99,7 +99,7 @@ def parse_args():
     parser.add_argument(
         "--quiet",
         action="store_true",
-        help="Suppress progress indicators during image pull",
+        help="Suppress image pull progress and the Connect logs shown while Connect starts",
     )
     parser.add_argument(
         "--port",
@@ -455,12 +455,13 @@ def main() -> int:
 
     server_url = f"http://localhost:{args.port}"
     stop_container = True
+    # Echo Connect's startup logs to stderr (stdout is reserved for KEY=value lines)
+    startup_logs = ContainerLogs(container, quiet=args.quiet)
 
     try:
         print(f"Waiting for port {args.port} to open...", file=sys.stderr)
         if not is_port_open("localhost", args.port, timeout=60.0, container=container):
-            print("\nContainer logs:", file=sys.stderr)
-            print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
+            startup_logs.dump()
             if container.status in ("exited", "dead"):
                 raise RuntimeError(
                     f"Posit Connect container exited before port {args.port} opened."
@@ -468,14 +469,15 @@ def main() -> int:
             raise RuntimeError("Posit Connect did not start within 60 seconds.")
 
         print("Waiting for HTTP server to start...", file=sys.stderr)
-        if not wait_for_http_server(container, timeout=60.0, poll_interval=2.0):
-            print("\nContainer logs:", file=sys.stderr)
-            print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
+        if not wait_for_http_server(
+            container, timeout=60.0, poll_interval=2.0, startup_logs=startup_logs
+        ):
+            startup_logs.dump()
             raise RuntimeError(
                 "Posit Connect did not log HTTP server start within 60 seconds."
             )
 
-        api_key = get_api_key(bootstrap_secret, container, server_url)
+        api_key = get_api_key(bootstrap_secret, container, server_url, startup_logs)
 
         # Execute user command if provided
         exit_code = 0
@@ -560,8 +562,55 @@ def extract_server_version(logs: str) -> str | None:
     return None
 
 
+class ContainerLogs:
+    """
+    Read a container's logs and echo new lines to stderr as they appear.
+
+    Each poll() fetches the full log and prints only the complete lines that
+    haven't been shown yet, so callers can poll in a loop. dump() prints
+    whatever is left when something fails, so no line is printed twice.
+    With quiet=True nothing is echoed, and dump() prints the whole log.
+    """
+
+    def __init__(self, container, quiet: bool = False):
+        self.container = container
+        self.quiet = quiet
+        self.shown = 0  # bytes of the log already printed
+
+    def poll(self) -> str:
+        """Fetch the full log, echo new complete lines, and return the log."""
+        logs = self.container.logs()
+        if not self.quiet:
+            # Hold back a trailing partial line until it is finished
+            end = logs.rfind(b"\n", self.shown) + 1
+            if end > self.shown:
+                self._print(logs[self.shown : end])
+                self.shown = end
+        return logs.decode("utf-8", errors="replace")
+
+    def dump(self) -> None:
+        """Print the part of the log that hasn't been shown yet."""
+        logs = self.container.logs()
+        if self.shown == 0:
+            print("\nContainer logs:", file=sys.stderr)
+        elif len(logs) > self.shown:
+            print("\nContainer logs (continued):", file=sys.stderr)
+        self._print(logs[self.shown :])
+        self.shown = len(logs)
+
+    @staticmethod
+    def _print(chunk: bytes) -> None:
+        if not chunk:
+            return
+        text = chunk.decode("utf-8", errors="replace")
+        print(text, end="" if text.endswith("\n") else "\n", file=sys.stderr, flush=True)
+
+
 def wait_for_http_server(
-    container, timeout: float = 60.0, poll_interval: float = 2.0
+    container,
+    timeout: float = 60.0,
+    poll_interval: float = 2.0,
+    startup_logs: ContainerLogs | None = None,
 ) -> bool:
     """
     Wait until the container logs contain the HTTP server start message.
@@ -571,21 +620,24 @@ def wait_for_http_server(
     :param container: docker.models.containers.Container instance
     :param timeout: Maximum seconds to wait (default 60)
     :param poll_interval: Seconds between log checks (default 2)
+    :param startup_logs: ContainerLogs that echoes new log lines to stderr
+        while waiting (default: a quiet one that echoes nothing)
     :return: True if message found before timeout, False otherwise
     """
+    if startup_logs is None:
+        startup_logs = ContainerLogs(container, quiet=True)
     deadline = time.time() + timeout
     version = None
 
     while time.time() < deadline:
-        logs = container.logs().decode("utf-8", errors="replace")
+        logs = startup_logs.poll()
         if not version:
             version = extract_server_version(logs)
             if version:
                 print(f"Running Posit Connect v{version}", file=sys.stderr)
 
         if "Unable to obtain a valid license" in logs:
-            print("\nContainer logs:", file=sys.stderr)
-            print(logs, file=sys.stderr)
+            startup_logs.dump()
             raise RuntimeError(
                 "Unable to obtain a valid license. Your Posit Connect license may be expired or invalid. Please check your license file."
             )
@@ -652,14 +704,22 @@ def post_bootstrap(server_url: str, token: str) -> dict:
     raise AssertionError("unreachable")
 
 
-def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
+def get_api_key(
+    bootstrap_secret: str,
+    container,
+    server_url: str,
+    startup_logs: ContainerLogs | None = None,
+) -> str:
     """
     Bootstrap Connect and retrieve an API key.
 
     Uses Connect's bootstrap endpoint with a JWT generated from the bootstrap
     secret to create and retrieve an API key. This key is used to authenticate
     commands run against the Connect instance. Requires Connect 2022.10.0+.
+    On failure, prints the container logs not already shown by startup_logs.
     """
+    if startup_logs is None:
+        startup_logs = ContainerLogs(container, quiet=True)
     try:
         # The bootstrap_secret we received is base64-encoded, need to decode it
         secret_bytes = base64.b64decode(bootstrap_secret.encode("utf-8"))
@@ -670,8 +730,7 @@ def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
             raise RuntimeError(f"Bootstrap returned unexpected response: {response}")
         return api_key
     except Exception as e:
-        print("\nContainer logs:", file=sys.stderr)
-        print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
+        startup_logs.dump()
         raise RuntimeError(f"Failed to bootstrap Connect and retrieve API key: {e}")
 
 
