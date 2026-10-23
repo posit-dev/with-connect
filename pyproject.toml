@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "docker>=7.1.0",
-    "rsconnect>=1.29.0",
+    "rsconnect-python",
 ]
 
 [project.scripts]
@@ -14,3 +14,8 @@ with-connect = "main:main"
 
 [tool.setuptools]
 py-modules = ["main"]
+
+[tool.uv.sources]
+# Unreleased: use v1 bootstrap endpoint with fallback to experimental
+# (posit-dev/rsconnect-python#879). Revert to a PyPI release once one includes it.
+rsconnect-python = { git = "https://github.com/posit-dev/rsconnect-python", rev = "8c578e7d4b2a851ce0817cf282d4b1636a968146" }

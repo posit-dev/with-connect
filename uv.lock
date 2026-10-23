@@ -87,6 +87,15 @@ wheels = [
 ]
 
 [[package]]
+name = "packaging"
+version = "26.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/7d/fa/3944b40b07da9ce895c0e6303a5ab7d53da063554f534556b134a54d6093/packaging-26.3.tar.gz", hash = "sha256:94edc256424af38762eb31306eed28beb9f0efc50a8837492c9d6fd6004aed79", size = 313412, upload-time = "2026-08-04T18:15:28.737Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/63/34/ba1c580383c9eada3711951fef0795c80b829a078d72188184bcab9dd527/packaging-26.3-py3-none-any.whl", hash = "sha256:d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c", size = 129956, upload-time = "2026-08-04T18:15:27.159Z" },
+]
+
+[[package]]
 name = "pip"
 version = "25.2"
 source = { registry = "https://pypi.org/simple" }
@@ -97,11 +106,11 @@ wheels = [
 
 [[package]]
 name = "pyjwt"
-version = "2.10.1"
+version = "2.15.1"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/e7/46/bd74733ff231675599650d3e47f361794b22ef3e3770998dda30d3b63726/pyjwt-2.10.1.tar.gz", hash = "sha256:3cc5772eb20009233caf06e9d8a0577824723b44e6648ee0a2aedb6cf9381953", size = 87785, upload-time = "2024-11-28T03:43:29.933Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/43/ea/5194e52748b0da83d71e082d75496eaec6e58f419f5e184786ded517e6a9/pyjwt-2.15.1.tar.gz", hash = "sha256:4f259e80cdfb6b3fc18a7de51fd1ef9ec79652f25019bae68975ca2468a34df8", size = 121252, upload-time = "2026-09-28T18:40:42.598Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/61/ad/689f02752eeec26aed679477e80e632ef1b682313be70793d798c1d5fc8f/PyJWT-2.10.1-py3-none-any.whl", hash = "sha256:dcdd193e30abefd5debf142f9adfcdd2b58004e644f25406ffaebd50bd98dacb", size = 22997, upload-time = "2024-11-28T03:43:27.893Z" },
+    { url = "https://files.pythonhosted.org/packages/50/ca/44de4e75f8aadc457f0634be3b542815078ded46dca30efb960edeecad6e/pyjwt-2.15.1-py3-none-any.whl", hash = "sha256:42d59d631f7768a1028a64c7ff581a9bf7519804daf91fc5b6c56e30eec5e193", size = 33860, upload-time = "2026-09-28T18:40:41.429Z" },
 ]
 
 [[package]]
@@ -133,19 +142,17 @@ wheels = [
 ]
 
 [[package]]
-name = "rsconnect"
-version = "1.29.0"
-source = { registry = "https://pypi.org/simple" }
+name = "rsconnect-python"
+version = "1.32.1.dev1"
+source = { git = "https://github.com/posit-dev/rsconnect-python?rev=8c578e7d4b2a851ce0817cf282d4b1636a968146#8c578e7d4b2a851ce0817cf282d4b1636a968146" }
 dependencies = [
     { name = "click" },
+    { name = "packaging" },
     { name = "pip" },
     { name = "pyjwt" },
     { name = "semver" },
     { name = "typing-extensions" },
     { name = "uv" },
-]
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/57/36/c5dbf592afc8127390edeaa5f342a1e4f7fccce04ed1b50552181e651015/rsconnect-1.29.0-py2.py3-none-any.whl", hash = "sha256:69d480fe8d87ee281c9d986c85d342b95e4952cbf0dd942cc2a42172dc036a62", size = 116832, upload-time = "2026-04-29T19:10:39.903Z" },
 ]
 
 [[package]]
@@ -207,11 +214,11 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "docker" },
-    { name = "rsconnect" },
+    { name = "rsconnect-python" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "docker", specifier = ">=7.1.0" },
-    { name = "rsconnect", specifier = ">=1.29.0" },
+    { name = "rsconnect-python", git = "https://github.com/posit-dev/rsconnect-python?rev=8c578e7d4b2a851ce0817cf282d4b1636a968146" },
 ]
