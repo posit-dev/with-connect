@@ -22,9 +22,6 @@ inputs:
     description: 'Port to map the Connect container to'
     required: false
     default: '3939'
-  docker-timeout:
-    description: 'Seconds to wait for each Docker API call, such as creating the container (default: 120)'
-    required: false
   env:
     description: 'Environment variables to pass to Docker container (one per line, format: KEY=VALUE)'
     required: false
@@ -33,6 +30,9 @@ inputs:
     required: false
   stop:
     description: 'Container ID to stop (use instead of starting a new container)'
+    required: false
+  docker-timeout:
+    description: 'Seconds to wait for each Docker API call, such as creating the container (default: 120)'
     required: false
 
 outputs:
@@ -76,7 +76,7 @@ runs:
         fi
 
         # Build arguments
-        ARGS="--version ${{ inputs.version }} --port ${{ inputs.port }} $DOCKER_ARGS"
+        ARGS="--version ${{ inputs.version }} --port ${{ inputs.port }}"
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config-file }}"
         fi
@@ -86,6 +86,7 @@ runs:
         if [ "${{ inputs.quiet }}" = "true" ]; then
           ARGS="$ARGS --quiet"
         fi
+        ARGS="$ARGS $DOCKER_ARGS"
         if [ -n "${{ inputs.env }}" ]; then
           while IFS= read -r line; do
             if [ -n "$line" ]; then
