@@ -19,9 +19,8 @@ inputs:
     required: false
     default: 'false'
   port:
-    description: 'Port to map the Connect container to'
+    description: 'Port to map the Connect container to (default: 3939, or a free port if 3939 is in use)'
     required: false
-    default: '3939'
   env:
     description: 'Environment variables to pass to Docker container (one per line, format: KEY=VALUE)'
     required: false
@@ -68,7 +67,10 @@ runs:
         fi
 
         # Build arguments
-        ARGS="--version ${{ inputs.version }} --port ${{ inputs.port }}"
+        ARGS="--version ${{ inputs.version }}"
+        if [ -n "${{ inputs.port }}" ]; then
+          ARGS="$ARGS --port ${{ inputs.port }}"
+        fi
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config-file }}"
         fi
