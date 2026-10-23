@@ -22,6 +22,9 @@ inputs:
     description: 'Port to map the Connect container to'
     required: false
     default: '3939'
+  docker-timeout:
+    description: 'Seconds to wait for each Docker API call, such as creating the container (default: 120)'
+    required: false
   env:
     description: 'Environment variables to pass to Docker container (one per line, format: KEY=VALUE)'
     required: false
@@ -74,6 +77,9 @@ runs:
         fi
         if [ -n "${{ inputs.image }}" ]; then
           ARGS="$ARGS --image ${{ inputs.image }}"
+        fi
+        if [ -n "${{ inputs.docker-timeout }}" ]; then
+          ARGS="$ARGS --docker-timeout ${{ inputs.docker-timeout }}"
         fi
         if [ "${{ inputs.quiet }}" = "true" ]; then
           ARGS="$ARGS --quiet"

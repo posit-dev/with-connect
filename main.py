@@ -29,6 +29,11 @@ REGISTRY_CUTOVER_MONTH = 4
 # Matches the Connect server's command line, for pkill -f
 CONNECT_PROCESS_PATTERN = "^/opt/rstudio-connect/bin/connect( |$)"
 
+# Seconds to wait for each Docker API call. docker-py's default of 60 is
+# too short for container create on a busy machine.
+DOCKER_TIMEOUT = 120
+DOCKER_TIMEOUT_ENV = "DOCKER_CLIENT_TIMEOUT"
+
 DESCRIPTION = """\
 Starts Posit Connect in Docker and waits until it is ready.
 
@@ -58,6 +63,17 @@ def port_number(value: str) -> int:
     if not 1 <= port <= 65535:
         raise argparse.ArgumentTypeError(f"{port} is not a valid port. Use a free port from 1 to 65535.")
     return port
+
+
+def timeout_seconds(value: str) -> float:
+    """Parse --docker-timeout: a positive number of seconds."""
+    try:
+        seconds = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid timeout value: '{value}'")
+    if not 0 < seconds < float("inf"):
+        raise argparse.ArgumentTypeError(f"{value} is not a valid timeout. Use a positive number of seconds.")
+    return seconds
 
 
 def parse_args():
@@ -108,6 +124,13 @@ def parse_args():
         help="Port to map the Connect container to (default: 3939)",
     )
     parser.add_argument(
+        "--docker-timeout",
+        type=timeout_seconds,
+        metavar="SECONDS",
+        help=f"Seconds to wait for each Docker API call, such as creating the container "
+        f"(default: ${DOCKER_TIMEOUT_ENV} if set, else {DOCKER_TIMEOUT})",
+    )
+    parser.add_argument(
         "--stop",
         nargs="?",
         default=None,
@@ -129,6 +152,15 @@ def parse_args():
 
     args = parser.parse_args(main_args)
     args.command = command_args
+    if args.docker_timeout is None:
+        env_timeout = os.environ.get(DOCKER_TIMEOUT_ENV)
+        if env_timeout:
+            try:
+                args.docker_timeout = timeout_seconds(env_timeout)
+            except argparse.ArgumentTypeError as e:
+                parser.error(f"{DOCKER_TIMEOUT_ENV}: {e}")
+        else:
+            args.docker_timeout = DOCKER_TIMEOUT
     return args
 
 
@@ -172,14 +204,49 @@ def has_local_image(client, image_name: str) -> bool:
         return False
 
 
-def docker_client():
+def context_docker_host() -> str | None:
+    """
+    Find the Docker socket from the Docker CLI's current context.
+
+    docker-py only reads DOCKER_HOST and otherwise assumes
+    /var/run/docker.sock, but Docker Desktop, Colima, OrbStack and others
+    put their socket elsewhere and point a Docker context at it. Use the
+    context the docker command would use (DOCKER_CONTEXT, else
+    currentContext in the Docker config) when DOCKER_HOST isn't set.
+
+    Only local sockets (unix:// and npipe://) are returned. tcp:// and
+    ssh:// contexts need TLS or SSH settings, so they fall back to
+    docker-py's defaults. Returns None to use those defaults.
+    """
+    if os.environ.get("DOCKER_HOST"):
+        return None
+    try:
+        context = docker.ContextAPI.get_context(os.environ.get("DOCKER_CONTEXT") or None)
+    except Exception:
+        return None  # An unreadable context shouldn't stop the default socket from working
+    host = context.Host if context else None
+    if not host or not host.startswith(("unix://", "npipe://")):
+        return None
+    if host == docker.ContextAPI.DEFAULT_CONTEXT.Host:
+        return None
+    return host
+
+
+def docker_client(timeout: float = DOCKER_TIMEOUT):
     """
     Connect to the Docker daemon, with a short error if it isn't reachable.
+
+    :param timeout: Seconds to wait for each Docker API call.
     """
+    environment = dict(os.environ)
+    host = context_docker_host()
+    if host:
+        environment["DOCKER_HOST"] = host
     try:
-        return docker.from_env()
+        return docker.from_env(timeout=timeout, environment=environment)
     except docker.errors.DockerException as e:
-        raise RuntimeError(f"Could not connect to Docker. Is it running? {e}")
+        where = f" at {host} (from the current Docker context)" if host else ""
+        raise RuntimeError(f"Could not connect to Docker{where}. Is it running? {e}")
 
 
 def _force_amd64(base_image: str) -> bool:
@@ -387,7 +454,7 @@ def run() -> int:
         container_id = args.stop or os.environ.get("CONTAINER_ID")
         if not container_id:
             raise RuntimeError("No container ID provided and CONTAINER_ID environment variable not set")
-        client = docker_client()
+        client = docker_client(args.docker_timeout)
         try:
             container = client.containers.get(container_id)
             stop_connect_container(container)
@@ -416,7 +483,7 @@ def run() -> int:
     if args.image and args.version != VERSION:
         raise RuntimeError("Cannot specify both 'image' and 'version'")
 
-    client = docker_client()
+    client = docker_client(args.docker_timeout)
 
     if args.image:
         base_image, tag, used_default = parse_image_spec(args.image)
