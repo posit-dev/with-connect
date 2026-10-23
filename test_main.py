@@ -329,6 +329,26 @@ def test_no_command_without_separator():
     assert parse_with_argv("--quiet").command == []
 
 
+def test_separator_without_command_is_rejected():
+    code, output = parse_exit("--quiet", "--")
+
+    assert code == 2
+    assert "no command given after --" in output
+
+
+def test_missing_command_fails_before_starting_connect():
+    with tempfile.NamedTemporaryFile(suffix=".lic") as license_file:
+        with patch.object(main.docker, "from_env") as from_env:
+            output = io.StringIO()
+            argv = ["with-connect", "--license", license_file.name, "--", "no-such-command-xyz"]
+            with patch.object(sys, "argv", argv), redirect_stderr(output):
+                result_code = main.main()
+
+    assert result_code == 127
+    assert "command not found: no-such-command-xyz" in output.getvalue()
+    from_env.assert_not_called()
+
+
 def test_stop_nonexistent_container():
     """Test that --stop with nonexistent container returns error."""
     result = subprocess.run(
@@ -434,6 +454,12 @@ if __name__ == "__main__":
 
     test_no_command_without_separator()
     print("✓ test_no_command_without_separator passed")
+
+    test_separator_without_command_is_rejected()
+    print("✓ test_separator_without_command_is_rejected passed")
+
+    test_missing_command_fails_before_starting_connect()
+    print("✓ test_missing_command_fails_before_starting_connect passed")
 
     test_stop_nonexistent_container()
     print("✓ test_stop_nonexistent_container passed")

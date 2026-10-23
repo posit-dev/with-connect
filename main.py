@@ -2,6 +2,7 @@ import argparse
 import base64
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
@@ -31,7 +32,8 @@ Stop it later with: with-connect --stop CONTAINER_ID
 Progress and errors go to stderr.
 
 With "-- COMMAND", runs COMMAND with CONNECT_API_KEY and CONNECT_SERVER
-set, then stops the container and exits with the command's exit code."""
+set, then stops the container and exits with the command's exit code.
+If COMMAND can't be found, exits with code 127 without starting Connect."""
 
 EPILOG = """\
 examples:
@@ -112,6 +114,8 @@ def parse_args():
         separator_index = sys.argv.index("--")
         main_args = sys.argv[1:separator_index]
         command_args = sys.argv[separator_index + 1 :]
+        if not command_args:
+            parser.error("no command given after --")
     else:
         main_args = sys.argv[1:]
         command_args = []
@@ -300,6 +304,11 @@ def main() -> int:
         except docker.errors.NotFound:
             raise RuntimeError(f"Container not found: {container_id}")
 
+    # Fail before starting Connect if the command can't be run
+    if args.command and shutil.which(args.command[0]) is None:
+        print(f"Error: command not found: {args.command[0]}", file=sys.stderr)
+        return 127
+
     license_path = os.path.abspath(os.path.expanduser(args.license))
     if not os.path.exists(license_path):
         raise RuntimeError(f"License file does not exist: {license_path}")
@@ -404,6 +413,12 @@ def main() -> int:
                 exit_code = result.returncode
             except subprocess.CalledProcessError as e:
                 exit_code = e.returncode
+            except FileNotFoundError:
+                print(f"Error: command not found: {args.command[0]}", file=sys.stderr)
+                exit_code = 127
+            except PermissionError:
+                print(f"Error: permission denied: {args.command[0]}", file=sys.stderr)
+                exit_code = 126
         else:
             # Start-only mode: output credentials and keep container running
             print(f"CONNECT_API_KEY={api_key}")
