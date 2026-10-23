@@ -67,7 +67,7 @@ Without `bash -c`, the environment variables would be evaluated before `with-con
 | `--license`   | `./rstudio-connect.lic` | Path to license file. This file must exist and be a valid Connect license.                                           |
 | `--image`     |                         | Container image to use, including tag (e.g., `posit/connect:2025.12.0`). Overrides `--version`.                      |
 | `--config`    |                         | Path to optional rstudio-connect.gcfg configuration file                                                             |
-| `--port`      | `3939`                  | Port to map the Connect container to. Allows running multiple Connect instances simultaneously.                      |
+| `--port`      | `3939`                  | Port to map the Connect container to. If not given and 3939 is in use, a free port is chosen, so multiple Connect instances can run at once. `CONNECT_SERVER` has the port in use. |
 | `-e`, `--env` |                         | Environment variables to pass to the Docker container (format: KEY=VALUE). Can be specified multiple times.          |
 | `--stop`      |                         | Stop a running Connect container by ID, or use `CONTAINER_ID` env var if not specified.                              |
 
@@ -130,7 +130,7 @@ The GitHub Action supports the following inputs:
 | `version`     | No       | `release` | Posit Connect version                                                                         |
 | `image`       | No       |           | Container image to use, including tag (e.g., `posit/connect:2025.12.0`). Overrides `version`. |
 | `config-file` | No       |           | Path to rstudio-connect.gcfg configuration file                                               |
-| `port`        | No       | `3939`    | Port to map the Connect container to                                                          |
+| `port`        | No       | `3939`    | Port to map the Connect container to. If not given and 3939 is in use, a free port is chosen. The `CONNECT_SERVER` output has the port in use. |
 | `quiet`       | No       | `false`   | Suppress image pull progress and the Connect logs shown while Connect starts                  |
 | `env`         | No       |           | Environment variables to pass to Docker container (one per line, format: KEY=VALUE)           |
 | `command`     | No       |           | Command to run against Connect (omit for start-only mode)                                     |

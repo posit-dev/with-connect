@@ -20,6 +20,7 @@ IMAGE = "ghcr.io/posit-dev/connect"
 PREVIEW_IMAGE = "ghcr.io/posit-dev/connect-preview"
 LEGACY_IMAGE = "rstudio/rstudio-connect"
 VERSION = "release"
+DEFAULT_PORT = 3939
 
 # Versions at or after this registry cutover land on ghcr.io/posit-dev.
 # Older versions only exist on the legacy Docker Hub images.
@@ -104,8 +105,7 @@ def parse_args():
     parser.add_argument(
         "--port",
         type=port_number,
-        default=3939,
-        help="Port to map the Connect container to (default: 3939)",
+        help=f"Port to map the Connect container to (default: {DEFAULT_PORT}, or a free port if {DEFAULT_PORT} is in use)",
     )
     parser.add_argument(
         "--stop",
@@ -450,13 +450,17 @@ def run() -> int:
         )
 
     container_env = build_container_env(bootstrap_secret, args.env_vars)
+    port = args.port
+    if port is None and is_port_free(DEFAULT_PORT):
+        port = DEFAULT_PORT
 
     create_kwargs = {
         "image": image_name,
         "tty": True,
         "stdin_open": True,
         "privileged": True,
-        "ports": {"3939/tcp": args.port},
+        # None has Docker assign a free host port
+        "ports": {"3939/tcp": port},
         "mounts": mounts,
         "environment": container_env,
     }
@@ -477,18 +481,22 @@ def run() -> int:
             pass  # Don't hide the start error behind a cleanup error
         raise RuntimeError(f"Failed to start container from {image_name}: {e}")
 
-    server_url = f"http://localhost:{args.port}"
     stop_container = True
     # Echo Connect's startup logs to stderr (stdout is reserved for KEY=value lines)
     startup_logs = ContainerLogs(container, quiet=args.quiet)
 
     try:
-        print(f"Waiting for port {args.port} to open...", file=sys.stderr)
-        if not is_port_open("localhost", args.port, timeout=60.0, container=container):
+        if port is None:
+            port = published_port(container)
+            print(f"Port {DEFAULT_PORT} is in use. Using port {port}.", file=sys.stderr)
+        server_url = f"http://localhost:{port}"
+
+        print(f"Waiting for port {port} to open...", file=sys.stderr)
+        if not is_port_open("localhost", port, timeout=60.0, container=container):
             startup_logs.dump()
             if container.status in ("exited", "dead"):
                 raise RuntimeError(
-                    f"Posit Connect container exited before port {args.port} opened."
+                    f"Posit Connect container exited before port {port} opened."
                 )
             raise RuntimeError("Posit Connect did not start within 60 seconds.")
 
@@ -578,6 +586,33 @@ def is_port_open(
             if remaining <= 0:
                 return False
             time.sleep(min(poll_interval, remaining))
+
+
+def is_port_free(port: int) -> bool:
+    """
+    Check if a host port is free by trying to bind to it on all interfaces,
+    which is how Docker publishes container ports.
+
+    Docker reports a port taken by another container, but Docker Desktop
+    doesn't report one taken by a process on the host.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(("", port))
+            return True
+        except OSError:
+            return False
+
+
+def published_port(container) -> int:
+    """
+    Return the host port Docker assigned to the container's port 3939.
+    """
+    container.reload()
+    bindings = container.ports.get("3939/tcp") or []
+    if not bindings:
+        raise RuntimeError("Docker did not assign a host port to the container")
+    return int(bindings[0]["HostPort"])
 
 
 def extract_server_version(logs: str) -> str | None:

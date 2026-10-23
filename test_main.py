@@ -485,6 +485,19 @@ def test_port_range_limits_are_accepted():
     assert parse_with_argv("--port", "65535").port == 65535
 
 
+def test_port_defaults_to_none():
+    assert parse_with_argv().port is None
+
+
+def test_is_port_free():
+    with main.socket.socket(main.socket.AF_INET, main.socket.SOCK_STREAM) as s:
+        s.bind(("", 0))
+        s.listen()
+        port = s.getsockname()[1]
+        assert main.is_port_free(port) is False
+    assert main.is_port_free(port) is True
+
+
 def test_help_explains_how_to_stop():
     code, output = parse_exit("--help")
     help_text = " ".join(output.split())
@@ -731,14 +744,15 @@ def test_post_bootstrap_raises_on_other_errors():
 
 
 
-def run_with_client(client):
+def run_with_client(client, *args, port_free=True):
     """Run run() against a mock Docker client, expecting a RuntimeError."""
     with tempfile.NamedTemporaryFile(suffix=".lic") as license_file:
-        argv = ["with-connect", "--license", license_file.name, "--quiet"]
+        argv = ["with-connect", "--license", license_file.name, "--quiet", *args]
         with (
             patch.object(sys, "argv", argv),
             patch.object(main.docker, "from_env", return_value=client),
             patch.object(main, "ensure_image"),
+            patch.object(main, "is_port_free", return_value=port_free),
         ):
             try:
                 main.run()
@@ -763,7 +777,7 @@ def test_container_create_error_is_reported():
 
 
 def test_container_start_error_removes_container():
-    error = docker.errors.APIError("500 Server Error: port is already allocated")
+    error = docker.errors.APIError("500 Server Error: OCI runtime create failed")
     client = MagicMock()
     container = client.containers.create.return_value
     container.start.side_effect = error
@@ -778,12 +792,12 @@ def test_container_start_error_removes_container():
 def test_container_start_error_survives_failed_cleanup():
     client = MagicMock()
     container = client.containers.create.return_value
-    container.start.side_effect = docker.errors.APIError("port is already allocated")
+    container.start.side_effect = docker.errors.APIError("OCI runtime create failed")
     container.remove.side_effect = docker.errors.APIError("removal failed")
 
     message = run_with_client(client)
 
-    assert "port is already allocated" in message
+    assert "OCI runtime create failed" in message
 
 
 def test_stop_error_is_reported():
@@ -814,6 +828,52 @@ def test_cleanup_stop_error_does_not_hide_original_error():
 
     assert "did not start within 60 seconds" in message
     assert "Warning: failed to stop container abc123: daemon went away" in stderr.getvalue()
+
+def run_until_port_wait(*args, port_free=True):
+    """
+    Run with a mock Docker client that publishes port 50000, stopping at
+    the wait for Connect. Returns the client and what was printed to stderr.
+    """
+    client = MagicMock()
+    container = client.containers.create.return_value
+    container.ports = {"3939/tcp": [{"HostIp": "0.0.0.0", "HostPort": "50000"}]}
+    container.logs.return_value = b""
+    stderr = io.StringIO()
+    with patch.object(main, "is_port_open", return_value=False), redirect_stderr(stderr):
+        run_with_client(client, *args, port_free=port_free)
+    return client, stderr.getvalue()
+
+
+def test_default_port_used_when_free():
+    client, stderr = run_until_port_wait()
+
+    assert client.containers.create.call_args.kwargs["ports"] == {"3939/tcp": 3939}
+    assert "Waiting for port 3939 to open" in stderr
+
+
+def test_default_port_taken_uses_docker_assigned_port():
+    client, stderr = run_until_port_wait(port_free=False)
+
+    assert client.containers.create.call_args.kwargs["ports"] == {"3939/tcp": None}
+    assert "Port 3939 is in use. Using port 50000." in stderr
+    assert "Waiting for port 50000 to open" in stderr
+
+
+def test_explicit_port_used_even_if_taken():
+    client, stderr = run_until_port_wait("--port", "3939", port_free=False)
+
+    assert client.containers.create.call_args.kwargs["ports"] == {"3939/tcp": 3939}
+    assert "Waiting for port 3939 to open" in stderr
+
+
+def test_published_port_without_binding_is_an_error():
+    container = MagicMock()
+    container.ports = {}
+    try:
+        main.published_port(container)
+        assert False, "Expected RuntimeError"
+    except RuntimeError as e:
+        assert "did not assign a host port" in str(e)
 
 def test_docker_unreachable_is_reported():
     error = docker.errors.DockerException("Error while fetching server API version")
@@ -960,6 +1020,12 @@ if __name__ == "__main__":
     test_port_range_limits_are_accepted()
     print("✓ test_port_range_limits_are_accepted passed")
 
+    test_port_defaults_to_none()
+    print("✓ test_port_defaults_to_none passed")
+
+    test_is_port_free()
+    print("✓ test_is_port_free passed")
+
     test_help_explains_how_to_stop()
     print("✓ test_help_explains_how_to_stop passed")
 
@@ -1031,6 +1097,18 @@ if __name__ == "__main__":
 
     test_cleanup_stop_error_does_not_hide_original_error()
     print("✓ test_cleanup_stop_error_does_not_hide_original_error passed")
+
+    test_default_port_used_when_free()
+    print("✓ test_default_port_used_when_free passed")
+
+    test_default_port_taken_uses_docker_assigned_port()
+    print("✓ test_default_port_taken_uses_docker_assigned_port passed")
+
+    test_explicit_port_used_even_if_taken()
+    print("✓ test_explicit_port_used_even_if_taken passed")
+
+    test_published_port_without_binding_is_an_error()
+    print("✓ test_published_port_without_binding_is_an_error passed")
 
     test_docker_unreachable_is_reported()
     print("✓ test_docker_unreachable_is_reported passed")
