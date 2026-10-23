@@ -137,11 +137,16 @@ def check_command(command: str) -> int | None:
     if shutil.which(command):
         return None
     if os.path.dirname(command):
-        candidates = [command]
+        # An explicit path that exists (even a directory) can't be run
+        exists = os.path.exists(command)
     else:
+        # A PATH search skips directories, and an empty entry means the
+        # current directory
         path_dirs = os.environ.get("PATH", os.defpath).split(os.pathsep)
-        candidates = [os.path.join(d, command) for d in path_dirs if d]
-    if any(os.path.isfile(c) for c in candidates):
+        exists = any(
+            os.path.isfile(os.path.join(d or os.curdir, command)) for d in path_dirs
+        )
+    if exists:
         print(f"Error: permission denied: {command}", file=sys.stderr)
         return 126
     print(f"Error: command not found: {command}", file=sys.stderr)

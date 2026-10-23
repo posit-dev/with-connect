@@ -371,6 +371,33 @@ def test_check_command_not_executable():
         assert "permission denied" in output.getvalue()
 
 
+def test_check_command_empty_path_entry_searches_current_directory():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "script.sh"), "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(os.path.join(tmpdir, "script.sh"), 0o644)
+
+        cwd = os.getcwd()
+        os.chdir(tmpdir)
+        try:
+            with patch.dict(os.environ, {"PATH": os.pathsep}), redirect_stderr(io.StringIO()):
+                assert main.check_command("script.sh") == 126
+        finally:
+            os.chdir(cwd)
+
+
+def test_check_command_directory():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.mkdir(os.path.join(tmpdir, "subdir"))
+
+        with redirect_stderr(io.StringIO()):
+            # Running a directory by path is a permission error
+            assert main.check_command(os.path.join(tmpdir, "subdir")) == 126
+            # A PATH search skips directories
+            with patch.dict(os.environ, {"PATH": tmpdir}):
+                assert main.check_command("subdir") == 127
+
+
 def test_stop_nonexistent_container():
     """Test that --stop with nonexistent container returns error."""
     result = subprocess.run(
@@ -488,6 +515,12 @@ if __name__ == "__main__":
 
     test_check_command_not_executable()
     print("✓ test_check_command_not_executable passed")
+
+    test_check_command_empty_path_entry_searches_current_directory()
+    print("✓ test_check_command_empty_path_entry_searches_current_directory passed")
+
+    test_check_command_directory()
+    print("✓ test_check_command_directory passed")
 
     test_stop_nonexistent_container()
     print("✓ test_stop_nonexistent_container passed")
