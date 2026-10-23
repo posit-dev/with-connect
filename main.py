@@ -263,6 +263,32 @@ def parse_image_spec(image: str) -> tuple[str, str, bool]:
         return (image, "latest", True)
 
 
+def build_container_env(bootstrap_secret: str, env_vars: list[str] | None) -> dict[str, str]:
+    """
+    Build the container environment: bootstrap and logging settings first,
+    then user-provided KEY=VALUE env vars, which override them.
+
+    with-connect detects startup by reading the container's stdout for
+    "Starting HTTP server on", an INFO-level service log message. A --config
+    file that sends the service log to a file or raises its level above INFO
+    would hide that message, so force both here. CONNECT_* env vars take
+    precedence over the config file.
+    """
+    container_env = {
+        # "CONNECT_TENSORFLOW_ENABLED": "false",
+        "CONNECT_BOOTSTRAP_ENABLED": "true",
+        "CONNECT_BOOTSTRAP_SECRETKEY": bootstrap_secret,
+        "CONNECT_LOGGING_SERVICELOG": "STDOUT",
+        "CONNECT_LOGGING_SERVICELOGLEVEL": "INFO",
+    }
+    if env_vars:
+        for env_var in env_vars:
+            if "=" in env_var:
+                key, value = env_var.split("=", 1)
+                container_env[key] = value
+    return container_env
+
+
 def get_docker_tag(version: str) -> tuple[str, str]:
     """
     Convert a version string to the appropriate Docker image and tag.
@@ -411,17 +437,7 @@ def main() -> int:
             )
         )
 
-    # Build container environment with bootstrap settings and user-provided env vars
-    container_env = {
-        # "CONNECT_TENSORFLOW_ENABLED": "false",
-        "CONNECT_BOOTSTRAP_ENABLED": "true",
-        "CONNECT_BOOTSTRAP_SECRETKEY": bootstrap_secret,
-    }
-    if args.env_vars:
-        for env_var in args.env_vars:
-            if "=" in env_var:
-                key, value = env_var.split("=", 1)
-                container_env[key] = value
+    container_env = build_container_env(bootstrap_secret, args.env_vars)
 
     run_kwargs = {
         "image": image_name,

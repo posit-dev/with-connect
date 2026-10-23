@@ -133,6 +133,26 @@ def test_get_docker_tag_invalid_format():
     assert main.get_docker_tag("custom-tag") == ("rstudio/rstudio-connect", "custom-tag")
 
 
+def test_container_env_forces_service_log_to_stdout():
+    # Startup detection reads "Starting HTTP server on" from stdout, so the
+    # service log must go there at INFO level whatever --config says.
+    env = main.build_container_env("secret", None)
+    assert env["CONNECT_BOOTSTRAP_ENABLED"] == "true"
+    assert env["CONNECT_BOOTSTRAP_SECRETKEY"] == "secret"
+    assert env["CONNECT_LOGGING_SERVICELOG"] == "STDOUT"
+    assert env["CONNECT_LOGGING_SERVICELOGLEVEL"] == "INFO"
+
+
+def test_container_env_user_vars_override_defaults():
+    env = main.build_container_env(
+        "secret",
+        ["CONNECT_LOGGING_SERVICELOG=STDERR", "MY_VAR=a=b", "IGNORED"],
+    )
+    assert env["CONNECT_LOGGING_SERVICELOG"] == "STDERR"
+    assert env["MY_VAR"] == "a=b"
+    assert "IGNORED" not in env
+
+
 def test_force_amd64_legacy_rstudio_images():
     # Legacy rstudio/* on Docker Hub and ghcr.io/rstudio/* mirrors are
     # amd64-only and need the pin.
@@ -606,6 +626,12 @@ if __name__ == "__main__":
 
     test_get_docker_tag_invalid_format()
     print("✓ test_get_docker_tag_invalid_format passed")
+
+    test_container_env_forces_service_log_to_stdout()
+    print("✓ test_container_env_forces_service_log_to_stdout passed")
+
+    test_container_env_user_vars_override_defaults()
+    print("✓ test_container_env_user_vars_override_defaults passed")
 
     test_extract_server_version()
     print("✓ test_extract_server_version passed")
