@@ -172,6 +172,16 @@ def has_local_image(client, image_name: str) -> bool:
         return False
 
 
+def docker_client():
+    """
+    Connect to the Docker daemon, with a short error if it isn't reachable.
+    """
+    try:
+        return docker.from_env()
+    except docker.errors.DockerException as e:
+        raise RuntimeError(f"Could not connect to Docker. Is it running? {e}")
+
+
 def _force_amd64(base_image: str) -> bool:
     """
     Whether to force linux/amd64 when pulling and running an image.
@@ -357,9 +367,9 @@ def stop_connect_container(container) -> None:
     container.stop(timeout=2)
 
 
-def main() -> int:
+def run() -> int:
     """
-    Main entry point for the with-connect CLI tool.
+    Run the with-connect workflow and return the exit code.
 
     Orchestrates the full workflow:
     1. Parse arguments and validate file paths
@@ -377,7 +387,7 @@ def main() -> int:
         container_id = args.stop or os.environ.get("CONTAINER_ID")
         if not container_id:
             raise RuntimeError("No container ID provided and CONTAINER_ID environment variable not set")
-        client = docker.from_env()
+        client = docker_client()
         try:
             container = client.containers.get(container_id)
             stop_connect_container(container)
@@ -385,6 +395,8 @@ def main() -> int:
             return 0
         except docker.errors.NotFound:
             raise RuntimeError(f"Container not found: {container_id}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to stop container {container_id}: {e}")
 
     # Fail before starting Connect if the command can't be run
     if args.command:
@@ -404,7 +416,7 @@ def main() -> int:
     if args.image and args.version != VERSION:
         raise RuntimeError("Cannot specify both 'image' and 'version'")
 
-    client = docker.from_env()
+    client = docker_client()
 
     if args.image:
         base_image, tag, used_default = parse_image_spec(args.image)
@@ -439,9 +451,8 @@ def main() -> int:
 
     container_env = build_container_env(bootstrap_secret, args.env_vars)
 
-    run_kwargs = {
+    create_kwargs = {
         "image": image_name,
-        "detach": True,
         "tty": True,
         "stdin_open": True,
         "privileged": True,
@@ -450,8 +461,21 @@ def main() -> int:
         "environment": container_env,
     }
     if _force_amd64(base_image):
-        run_kwargs["platform"] = "linux/amd64"
-    container = client.containers.run(**run_kwargs)
+        create_kwargs["platform"] = "linux/amd64"
+    # Create and start separately so a container that fails to start
+    # can be removed instead of left behind
+    try:
+        container = client.containers.create(**create_kwargs)
+    except Exception as e:
+        raise RuntimeError(f"Failed to create container from {image_name}: {e}")
+    try:
+        container.start()
+    except Exception as e:
+        try:
+            container.remove(force=True)
+        except Exception:
+            pass  # Don't hide the start error behind a cleanup error
+        raise RuntimeError(f"Failed to start container from {image_name}: {e}")
 
     server_url = f"http://localhost:{args.port}"
     stop_container = True
@@ -506,7 +530,15 @@ def main() -> int:
         return exit_code
     finally:
         if stop_container:
-            stop_connect_container(container)
+            # Warn instead of raising so a stop failure doesn't replace the
+            # command's exit code or an error that is already being raised
+            try:
+                stop_connect_container(container)
+            except Exception as e:
+                print(
+                    f"Warning: failed to stop container {container.id}: {e}",
+                    file=sys.stderr,
+                )
 
 
 def is_port_open(
@@ -675,9 +707,18 @@ def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
         raise RuntimeError(f"Failed to bootstrap Connect and retrieve API key: {e}")
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """
+    Main entry point for the with-connect CLI tool.
+
+    Runs the workflow and reports errors as a short message.
+    """
     try:
-        sys.exit(main())
+        sys.exit(run())
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

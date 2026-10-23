@@ -8,6 +8,7 @@ import urllib.error
 import subprocess
 import sys
 import tempfile
+import tomllib
 from contextlib import redirect_stderr, redirect_stdout
 from unittest.mock import MagicMock, Mock, patch
 
@@ -76,7 +77,7 @@ def test_invalid_license_detection():
     except RuntimeError as e:
         assert "Unable to obtain a valid license" in str(e)
         assert "expired or invalid" in str(e)
-        # main() stops the container when this raises
+        # run() stops the container when this raises
         mock_container.stop.assert_not_called()
 
 
@@ -409,7 +410,7 @@ def test_missing_command_fails_before_starting_connect():
             output = io.StringIO()
             argv = ["with-connect", "--license", license_file.name, "--", "no-such-command-xyz"]
             with patch.object(sys, "argv", argv), redirect_stderr(output):
-                result_code = main.main()
+                result_code = main.run()
 
     assert result_code == 127
     assert "command not found: no-such-command-xyz" in output.getvalue()
@@ -499,7 +500,7 @@ def test_stop_mode_signals_connect():
         patch.object(main.docker, "from_env", return_value=client),
         redirect_stderr(io.StringIO()),
     ):
-        assert main.main() == 0
+        assert main.run() == 0
 
     container.exec_run.assert_called_once_with(
         ["pkill", "-TERM", "-f", main.CONNECT_PROCESS_PATTERN]
@@ -508,7 +509,7 @@ def test_stop_mode_signals_connect():
 
 def test_command_mode_signals_connect_after_command():
     client = MagicMock()
-    container = client.containers.run.return_value
+    container = client.containers.create.return_value
     container.exec_run.return_value = (0, b"")
     with tempfile.NamedTemporaryFile(suffix=".lic") as license_file:
         argv = ["with-connect", "--license", license_file.name, "--", "true"]
@@ -522,7 +523,7 @@ def test_command_mode_signals_connect_after_command():
             patch.object(main.subprocess, "run", return_value=Mock(returncode=0)),
             redirect_stderr(io.StringIO()),
         ):
-            assert main.main() == 0
+            assert main.run() == 0
 
     container.exec_run.assert_called_once_with(
         ["pkill", "-TERM", "-f", main.CONNECT_PROCESS_PATTERN]
@@ -620,6 +621,118 @@ def test_post_bootstrap_raises_on_other_errors():
     # A non-404 error should not trigger the experimental fallback
     assert urlopen.call_count == 1
 
+
+
+def run_with_client(client):
+    """Run run() against a mock Docker client, expecting a RuntimeError."""
+    with tempfile.NamedTemporaryFile(suffix=".lic") as license_file:
+        argv = ["with-connect", "--license", license_file.name, "--quiet"]
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(main.docker, "from_env", return_value=client),
+            patch.object(main, "ensure_image"),
+        ):
+            try:
+                main.run()
+            except RuntimeError as e:
+                return str(e)
+    raise AssertionError("Expected RuntimeError")
+
+
+def test_container_create_error_is_reported():
+    errors = [
+        docker.errors.APIError("400 Client Error: Bad Request (invalid mount config)"),
+        requests.exceptions.ReadTimeout("Read timed out. (read timeout=60)"),
+    ]
+    for error in errors:
+        client = MagicMock()
+        client.containers.create.side_effect = error
+
+        message = run_with_client(client)
+
+        assert "Failed to create container from" in message
+        assert str(error) in message
+
+
+def test_container_start_error_removes_container():
+    error = docker.errors.APIError("500 Server Error: port is already allocated")
+    client = MagicMock()
+    container = client.containers.create.return_value
+    container.start.side_effect = error
+
+    message = run_with_client(client)
+
+    assert "Failed to start container from" in message
+    assert str(error) in message
+    container.remove.assert_called_once_with(force=True)
+
+
+def test_container_start_error_survives_failed_cleanup():
+    client = MagicMock()
+    container = client.containers.create.return_value
+    container.start.side_effect = docker.errors.APIError("port is already allocated")
+    container.remove.side_effect = docker.errors.APIError("removal failed")
+
+    message = run_with_client(client)
+
+    assert "port is already allocated" in message
+
+
+def test_stop_error_is_reported():
+    client = MagicMock()
+    client.containers.get.return_value.stop.side_effect = docker.errors.APIError("permission denied")
+    with (
+        patch.object(sys, "argv", ["with-connect", "--stop", "abc123"]),
+        patch.object(main.docker, "from_env", return_value=client),
+    ):
+        try:
+            main.run()
+            assert False, "Expected RuntimeError"
+        except RuntimeError as e:
+            assert "Failed to stop container abc123" in str(e)
+            assert "permission denied" in str(e)
+
+
+def test_cleanup_stop_error_does_not_hide_original_error():
+    client = MagicMock()
+    container = client.containers.create.return_value
+    container.id = "abc123"
+    container.logs.return_value = b""
+    container.stop.side_effect = docker.errors.APIError("daemon went away")
+
+    stderr = io.StringIO()
+    with patch.object(main, "is_port_open", return_value=False), redirect_stderr(stderr):
+        message = run_with_client(client)
+
+    assert "did not start within 60 seconds" in message
+    assert "Warning: failed to stop container abc123: daemon went away" in stderr.getvalue()
+
+def test_docker_unreachable_is_reported():
+    error = docker.errors.DockerException("Error while fetching server API version")
+    with patch.object(main.docker, "from_env", side_effect=error):
+        try:
+            main.docker_client()
+            assert False, "Expected RuntimeError"
+        except RuntimeError as e:
+            assert "Could not connect to Docker" in str(e)
+            assert str(error) in str(e)
+
+
+def test_main_prints_short_error():
+    output = io.StringIO()
+    with patch.object(main, "run", side_effect=RuntimeError("boom")), redirect_stderr(output):
+        try:
+            main.main()
+            assert False, "Expected SystemExit"
+        except SystemExit as e:
+            assert e.code == 1
+    assert output.getvalue() == "Error: boom\n"
+
+
+def test_installed_command_uses_main():
+    with open(os.path.join(os.path.dirname(__file__), "pyproject.toml"), "rb") as f:
+        scripts = tomllib.load(f)["project"]["scripts"]
+    assert scripts["with-connect"] == "main:main"
 
 if __name__ == "__main__":
     test_license_file_not_exists()
@@ -777,5 +890,29 @@ if __name__ == "__main__":
 
     test_post_bootstrap_raises_on_other_errors()
     print("✓ test_post_bootstrap_raises_on_other_errors passed")
+
+    test_container_create_error_is_reported()
+    print("✓ test_container_create_error_is_reported passed")
+
+    test_container_start_error_removes_container()
+    print("✓ test_container_start_error_removes_container passed")
+
+    test_container_start_error_survives_failed_cleanup()
+    print("✓ test_container_start_error_survives_failed_cleanup passed")
+
+    test_stop_error_is_reported()
+    print("✓ test_stop_error_is_reported passed")
+
+    test_cleanup_stop_error_does_not_hide_original_error()
+    print("✓ test_cleanup_stop_error_does_not_hide_original_error passed")
+
+    test_docker_unreachable_is_reported()
+    print("✓ test_docker_unreachable_is_reported passed")
+
+    test_main_prints_short_error()
+    print("✓ test_main_prints_short_error passed")
+
+    test_installed_command_uses_main()
+    print("✓ test_installed_command_uses_main passed")
 
     print("\nAll tests passed!")
