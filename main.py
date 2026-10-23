@@ -430,10 +430,6 @@ def run() -> int:
 
     ensure_image(client, base_image, tag, args.version, args.quiet)
 
-    # Choose the port after pulling, which can take a while, so it is less
-    # likely to be taken by the time the container starts
-    host_port = choose_port(args.port)
-
     mounts = [
         docker.types.services.Mount(
             type="bind",
@@ -454,46 +450,53 @@ def run() -> int:
         )
 
     container_env = build_container_env(bootstrap_secret, args.env_vars)
+    port = args.port
+    if port is None and is_port_free(DEFAULT_PORT):
+        port = DEFAULT_PORT
 
     create_kwargs = {
         "image": image_name,
         "tty": True,
         "stdin_open": True,
         "privileged": True,
-        "ports": {"3939/tcp": host_port},
+        # None has Docker assign a free host port
+        "ports": {"3939/tcp": port},
         "mounts": mounts,
         "environment": container_env,
     }
     if _force_amd64(base_image):
         create_kwargs["platform"] = "linux/amd64"
+    # Create and start separately so a container that fails to start
+    # can be removed instead of left behind
     try:
-        container = start_container(client, create_kwargs, image_name)
-    except PortInUseError:
-        if args.port is not None or host_port is None:
-            raise
-        # Another process took the default port after we checked it
-        create_kwargs["ports"] = {"3939/tcp": None}
-        host_port = None
-        container = start_container(client, create_kwargs, image_name)
+        container = client.containers.create(**create_kwargs)
+    except Exception as e:
+        raise RuntimeError(f"Failed to create container from {image_name}: {e}")
+    try:
+        container.start()
+    except Exception as e:
+        try:
+            container.remove(force=True)
+        except Exception:
+            pass  # Don't hide the start error behind a cleanup error
+        raise RuntimeError(f"Failed to start container from {image_name}: {e}")
 
     stop_container = True
     # Echo Connect's startup logs to stderr (stdout is reserved for KEY=value lines)
     startup_logs = ContainerLogs(container, quiet=args.quiet)
 
     try:
-        if host_port is None:
-            args.port = published_port(container)
-            print(f"Port {DEFAULT_PORT} is in use. Using port {args.port}.", file=sys.stderr)
-        else:
-            args.port = host_port
-        server_url = f"http://localhost:{args.port}"
+        if port is None:
+            port = published_port(container)
+            print(f"Port {DEFAULT_PORT} is in use. Using port {port}.", file=sys.stderr)
+        server_url = f"http://localhost:{port}"
 
-        print(f"Waiting for port {args.port} to open...", file=sys.stderr)
-        if not is_port_open("localhost", args.port, timeout=60.0, container=container):
+        print(f"Waiting for port {port} to open...", file=sys.stderr)
+        if not is_port_open("localhost", port, timeout=60.0, container=container):
             startup_logs.dump()
             if container.status in ("exited", "dead"):
                 raise RuntimeError(
-                    f"Posit Connect container exited before port {args.port} opened."
+                    f"Posit Connect container exited before port {port} opened."
                 )
             raise RuntimeError("Posit Connect did not start within 60 seconds.")
 
@@ -589,6 +592,9 @@ def is_port_free(port: int) -> bool:
     """
     Check if a host port is free by trying to bind to it on all interfaces,
     which is how Docker publishes container ports.
+
+    Docker reports a port taken by another container, but Docker Desktop
+    doesn't report one taken by a process on the host.
     """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         try:
@@ -596,52 +602,6 @@ def is_port_free(port: int) -> bool:
             return True
         except OSError:
             return False
-
-
-def choose_port(requested: int | None) -> int | None:
-    """
-    Choose the host port for Connect.
-
-    An explicit --port is used as is, so Docker reports an error if it is
-    taken. Otherwise use DEFAULT_PORT if it's free, or None to have Docker
-    assign a free port when the container starts.
-    """
-    if requested is not None:
-        return requested
-    if is_port_free(DEFAULT_PORT):
-        return DEFAULT_PORT
-    return None
-
-
-class PortInUseError(RuntimeError):
-    """The container couldn't start because its host port is taken."""
-
-
-def start_container(client, create_kwargs: dict, image_name: str):
-    """
-    Create and start a container, removing it if it fails to start.
-
-    Creating and starting separately means a container that fails to start
-    can be removed instead of left behind. Raises PortInUseError if the
-    host port is taken, and RuntimeError for other failures.
-    """
-    try:
-        container = client.containers.create(**create_kwargs)
-    except Exception as e:
-        raise RuntimeError(f"Failed to create container from {image_name}: {e}")
-    try:
-        container.start()
-    except Exception as e:
-        try:
-            container.remove(force=True)
-        except Exception:
-            pass  # Don't hide the start error behind a cleanup error
-        message = f"Failed to start container from {image_name}: {e}"
-        # Docker's wording when another container or process has the port
-        if "port is already allocated" in str(e) or "address already in use" in str(e):
-            raise PortInUseError(message)
-        raise RuntimeError(message)
-    return container
 
 
 def published_port(container) -> int:

@@ -4,7 +4,6 @@ import hmac
 import io
 import json
 import os
-import socket
 import urllib.error
 import subprocess
 import sys
@@ -491,28 +490,12 @@ def test_port_defaults_to_none():
 
 
 def test_is_port_free():
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    with main.socket.socket(main.socket.AF_INET, main.socket.SOCK_STREAM) as s:
         s.bind(("", 0))
         s.listen()
         port = s.getsockname()[1]
         assert main.is_port_free(port) is False
     assert main.is_port_free(port) is True
-
-
-def test_choose_port_uses_explicit_port():
-    # An explicit port is used even if it's taken, so Docker reports the error
-    with patch.object(main, "is_port_free", return_value=False):
-        assert main.choose_port(4000) == 4000
-
-
-def test_choose_port_uses_default_when_free():
-    with patch.object(main, "is_port_free", return_value=True):
-        assert main.choose_port(None) == main.DEFAULT_PORT
-
-
-def test_choose_port_leaves_it_to_docker_when_default_taken():
-    with patch.object(main, "is_port_free", return_value=False):
-        assert main.choose_port(None) is None
 
 
 def test_help_explains_how_to_stop():
@@ -846,54 +829,41 @@ def test_cleanup_stop_error_does_not_hide_original_error():
     assert "did not start within 60 seconds" in message
     assert "Warning: failed to stop container abc123: daemon went away" in stderr.getvalue()
 
-def port_conflict_client():
-    """A mock Docker client whose first container hits a port conflict."""
-    taken = MagicMock()
-    taken.start.side_effect = docker.errors.APIError(
-        "Bind for 0.0.0.0:3939 failed: port is already allocated"
-    )
-    started = MagicMock()
-    started.ports = {"3939/tcp": [{"HostIp": "0.0.0.0", "HostPort": "50000"}]}
-    started.logs.return_value = b""
+def run_until_port_wait(*args, port_free=True):
+    """
+    Run with a mock Docker client that publishes port 50000, stopping at
+    the wait for Connect. Returns the client and what was printed to stderr.
+    """
     client = MagicMock()
-    client.containers.create.side_effect = [taken, started]
-    return client, taken, started
-
-
-def test_port_taken_after_check_retries_with_docker_assigned_port():
-    client, taken, started = port_conflict_client()
+    container = client.containers.create.return_value
+    container.ports = {"3939/tcp": [{"HostIp": "0.0.0.0", "HostPort": "50000"}]}
+    container.logs.return_value = b""
     stderr = io.StringIO()
-    # Stop after the port is chosen by failing the wait for Connect
     with patch.object(main, "is_port_open", return_value=False), redirect_stderr(stderr):
-        message = run_with_client(client)
+        run_with_client(client, *args, port_free=port_free)
+    return client, stderr.getvalue()
 
-    assert "did not start within 60 seconds" in message
-    taken.remove.assert_called_once_with(force=True)
-    ports = [c.kwargs["ports"] for c in client.containers.create.call_args_list]
-    assert ports == [{"3939/tcp": 3939}, {"3939/tcp": None}]
-    assert "Port 3939 is in use. Using port 50000." in stderr.getvalue()
-    assert "Waiting for port 50000 to open" in stderr.getvalue()
+
+def test_default_port_used_when_free():
+    client, stderr = run_until_port_wait()
+
+    assert client.containers.create.call_args.kwargs["ports"] == {"3939/tcp": 3939}
+    assert "Waiting for port 3939 to open" in stderr
 
 
 def test_default_port_taken_uses_docker_assigned_port():
-    client, _, started = port_conflict_client()
-    client.containers.create.side_effect = [started]
-    stderr = io.StringIO()
-    with patch.object(main, "is_port_open", return_value=False), redirect_stderr(stderr):
-        run_with_client(client, port_free=False)
+    client, stderr = run_until_port_wait(port_free=False)
 
     assert client.containers.create.call_args.kwargs["ports"] == {"3939/tcp": None}
-    assert "Using port 50000." in stderr.getvalue()
+    assert "Port 3939 is in use. Using port 50000." in stderr
+    assert "Waiting for port 50000 to open" in stderr
 
 
-def test_explicit_port_taken_is_reported_without_retry():
-    client, taken, _ = port_conflict_client()
+def test_explicit_port_used_even_if_taken():
+    client, stderr = run_until_port_wait("--port", "3939", port_free=False)
 
-    message = run_with_client(client, "--port", "3939")
-
-    assert "port is already allocated" in message
-    assert client.containers.create.call_count == 1
-    taken.remove.assert_called_once_with(force=True)
+    assert client.containers.create.call_args.kwargs["ports"] == {"3939/tcp": 3939}
+    assert "Waiting for port 3939 to open" in stderr
 
 
 def test_published_port_without_binding_is_an_error():
@@ -1056,15 +1026,6 @@ if __name__ == "__main__":
     test_is_port_free()
     print("✓ test_is_port_free passed")
 
-    test_choose_port_uses_explicit_port()
-    print("✓ test_choose_port_uses_explicit_port passed")
-
-    test_choose_port_uses_default_when_free()
-    print("✓ test_choose_port_uses_default_when_free passed")
-
-    test_choose_port_leaves_it_to_docker_when_default_taken()
-    print("✓ test_choose_port_leaves_it_to_docker_when_default_taken passed")
-
     test_help_explains_how_to_stop()
     print("✓ test_help_explains_how_to_stop passed")
 
@@ -1137,14 +1098,14 @@ if __name__ == "__main__":
     test_cleanup_stop_error_does_not_hide_original_error()
     print("✓ test_cleanup_stop_error_does_not_hide_original_error passed")
 
-    test_port_taken_after_check_retries_with_docker_assigned_port()
-    print("✓ test_port_taken_after_check_retries_with_docker_assigned_port passed")
+    test_default_port_used_when_free()
+    print("✓ test_default_port_used_when_free passed")
 
     test_default_port_taken_uses_docker_assigned_port()
     print("✓ test_default_port_taken_uses_docker_assigned_port passed")
 
-    test_explicit_port_taken_is_reported_without_retry()
-    print("✓ test_explicit_port_taken_is_reported_without_retry passed")
+    test_explicit_port_used_even_if_taken()
+    print("✓ test_explicit_port_used_even_if_taken passed")
 
     test_published_port_without_binding_is_an_error()
     print("✓ test_published_port_without_binding_is_an_error passed")
