@@ -458,9 +458,13 @@ def main() -> int:
 
     try:
         print(f"Waiting for port {args.port} to open...", file=sys.stderr)
-        if not is_port_open("localhost", args.port, timeout=60.0):
+        if not is_port_open("localhost", args.port, timeout=60.0, container=container):
             print("\nContainer logs:", file=sys.stderr)
             print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
+            if container.status in ("exited", "dead"):
+                raise RuntimeError(
+                    f"Posit Connect container exited before port {args.port} opened."
+                )
             raise RuntimeError("Posit Connect did not start within 60 seconds.")
 
         print("Waiting for HTTP server to start...", file=sys.stderr)
@@ -505,20 +509,41 @@ def main() -> int:
             stop_connect_container(container)
 
 
-def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
+def is_port_open(
+    host: str,
+    port: int,
+    timeout: float = 30.0,
+    poll_interval: float = 0.25,
+    container=None,
+) -> bool:
     """
-    Check if a TCP port on a given host is open.
+    Wait until a TCP port on a given host accepts connections.
+
+    Retries until the timeout because a published Docker port may not be
+    bound yet right after the container starts.
 
     :param host: Hostname or IP address to check.
     :param port: Port number to check.
-    :param timeout: Timeout in seconds (default 3.0).
-    :return: True if the port is open (accepting connections), False otherwise.
+    :param timeout: Maximum seconds to wait (default 30).
+    :param poll_interval: Seconds between connection attempts (default 0.25).
+    :param container: Optional docker container; stop waiting if it exits.
+    :return: True if the port opened before the timeout, False otherwise.
     """
-    try:
-        with socket.create_connection((host, port), timeout=timeout):
-            return True
-    except (socket.timeout, ConnectionRefusedError, OSError):
-        return False
+    deadline = time.monotonic() + timeout
+    while True:
+        if container is not None:
+            container.reload()
+            if container.status in ("exited", "dead"):
+                return False
+        remaining = deadline - time.monotonic()
+        try:
+            with socket.create_connection((host, port), timeout=max(remaining, 0.1)):
+                return True
+        except (socket.timeout, ConnectionRefusedError, OSError):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return False
+            time.sleep(min(poll_interval, remaining))
 
 
 def extract_server_version(logs: str) -> str | None:

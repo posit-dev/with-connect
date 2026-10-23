@@ -192,6 +192,46 @@ def test_extract_server_version_dev():
     assert main.extract_server_version(logs) == "2025.11.0-dev+29-gd0db52662c"
 
 
+def test_is_port_open_retries_until_port_opens():
+    # Docker Desktop refuses connections briefly after the container starts
+    refused = ConnectionRefusedError("Connection refused")
+    with patch.object(
+        main.socket, "create_connection", side_effect=[refused, refused, MagicMock()]
+    ) as create_connection:
+        result = main.is_port_open("localhost", 3939, timeout=5.0, poll_interval=0.01)
+
+    assert result is True
+    assert create_connection.call_count == 3
+
+
+def test_is_port_open_times_out_on_closed_port():
+    # Bind and close a socket to get a port that nothing is listening on
+    with main.socket.socket() as s:
+        s.bind(("localhost", 0))
+        port = s.getsockname()[1]
+
+    start = main.time.monotonic()
+    result = main.is_port_open("localhost", port, timeout=0.5, poll_interval=0.05)
+    elapsed = main.time.monotonic() - start
+
+    assert result is False
+    assert 0.4 <= elapsed < 5.0
+
+
+def test_is_port_open_stops_when_container_exits():
+    mock_container = MagicMock()
+    mock_container.status = "exited"
+
+    with patch.object(main.socket, "create_connection") as create_connection:
+        result = main.is_port_open(
+            "localhost", 3939, timeout=30.0, container=mock_container
+        )
+
+    assert result is False
+    mock_container.reload.assert_called_once()
+    create_connection.assert_not_called()
+
+
 def test_local_image_usage():
     mock_args = Mock()
     mock_args.version = "2024.08.0"
@@ -644,6 +684,15 @@ if __name__ == "__main__":
 
     test_extract_server_version_dev()
     print("✓ test_extract_server_version_dev passed")
+
+    test_is_port_open_retries_until_port_opens()
+    print("✓ test_is_port_open_retries_until_port_opens passed")
+
+    test_is_port_open_times_out_on_closed_port()
+    print("✓ test_is_port_open_times_out_on_closed_port passed")
+
+    test_is_port_open_stops_when_container_exits()
+    print("✓ test_is_port_open_stops_when_container_exits passed")
 
     test_local_image_usage()
     print("✓ test_local_image_usage passed")
