@@ -137,3 +137,31 @@ jobs:
               [ "$RESPONSE" = "[]" ] || exit 1
               echo "✓ CLI test passed - got valid JSON response"
             '
+
+  test-versions:
+    # Exercise bootstrap across the supported range: 2022.10.0 is the minimum,
+    # 2024.04.1 is the last release with only v1/experimental/bootstrap, and
+    # 2024.05.0 is the first with v1/bootstrap. Also spans image naming eras
+    # (bionic-, jammy-, ghcr.io/posit-dev).
+    strategy:
+      fail-fast: false
+      matrix:
+        version:
+          - 2022.10.0
+          - 2023.06.0
+          - 2023.09.0
+          - 2024.04.1
+          - 2024.05.0
+          - 2025.09.0
+          - release
+          - preview
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test with-connect ${{ matrix.version }}
+        uses: ./
+        with:
+          version: ${{ matrix.version }}
+          license: ${{ secrets.CONNECT_LICENSE }}
+          command: 'curl -f -H "Authorization: Key $CONNECT_API_KEY" $CONNECT_SERVER/__api__/v1/content'
