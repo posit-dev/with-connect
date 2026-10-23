@@ -33,7 +33,8 @@ Progress and errors go to stderr.
 
 With "-- COMMAND", runs COMMAND with CONNECT_API_KEY and CONNECT_SERVER
 set, then stops the container and exits with the command's exit code.
-If COMMAND can't be found, exits with code 127 without starting Connect."""
+If COMMAND can't be found, exits with code 127 (126 if it isn't
+executable) without starting Connect."""
 
 EPILOG = """\
 examples:
@@ -123,6 +124,28 @@ def parse_args():
     args = parser.parse_args(main_args)
     args.command = command_args
     return args
+
+
+def check_command(command: str) -> int | None:
+    """
+    Check that a command can be run, the way a shell would.
+
+    Returns None if the command can be run. Otherwise prints an error and
+    returns the shell's exit code: 126 if the command exists but isn't
+    executable, 127 if it can't be found.
+    """
+    if shutil.which(command):
+        return None
+    if os.path.dirname(command):
+        candidates = [command]
+    else:
+        path_dirs = os.environ.get("PATH", os.defpath).split(os.pathsep)
+        candidates = [os.path.join(d, command) for d in path_dirs if d]
+    if any(os.path.isfile(c) for c in candidates):
+        print(f"Error: permission denied: {command}", file=sys.stderr)
+        return 126
+    print(f"Error: command not found: {command}", file=sys.stderr)
+    return 127
 
 
 def has_local_image(client, image_name: str) -> bool:
@@ -305,9 +328,10 @@ def main() -> int:
             raise RuntimeError(f"Container not found: {container_id}")
 
     # Fail before starting Connect if the command can't be run
-    if args.command and shutil.which(args.command[0]) is None:
-        print(f"Error: command not found: {args.command[0]}", file=sys.stderr)
-        return 127
+    if args.command:
+        exit_code = check_command(args.command[0])
+        if exit_code is not None:
+            return exit_code
 
     license_path = os.path.abspath(os.path.expanduser(args.license))
     if not os.path.exists(license_path):

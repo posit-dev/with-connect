@@ -349,6 +349,28 @@ def test_missing_command_fails_before_starting_connect():
     from_env.assert_not_called()
 
 
+def test_check_command():
+    assert main.check_command(sys.executable) is None
+    with redirect_stderr(io.StringIO()):
+        assert main.check_command("no-such-command-xyz") == 127
+        assert main.check_command("./no-such-script.sh") == 127
+
+
+def test_check_command_not_executable():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        script = os.path.join(tmpdir, "script.sh")
+        with open(script, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(script, 0o644)
+
+        output = io.StringIO()
+        with redirect_stderr(output):
+            assert main.check_command(script) == 126
+            with patch.dict(os.environ, {"PATH": tmpdir}):
+                assert main.check_command("script.sh") == 126
+        assert "permission denied" in output.getvalue()
+
+
 def test_stop_nonexistent_container():
     """Test that --stop with nonexistent container returns error."""
     result = subprocess.run(
@@ -460,6 +482,12 @@ if __name__ == "__main__":
 
     test_missing_command_fails_before_starting_connect()
     print("✓ test_missing_command_fails_before_starting_connect passed")
+
+    test_check_command()
+    print("✓ test_check_command passed")
+
+    test_check_command_not_executable()
+    print("✓ test_check_command_not_executable passed")
 
     test_stop_nonexistent_container()
     print("✓ test_stop_nonexistent_container passed")
