@@ -131,7 +131,7 @@ The GitHub Action supports the following inputs:
 | `image`       | No       |           | Container image to use, including tag (e.g., `posit/connect:2025.12.0`). Overrides `version`. |
 | `config-file` | No       |           | Path to rstudio-connect.gcfg configuration file                                               |
 | `port`        | No       | `3939`    | Port to map the Connect container to                                                          |
-| `quiet`       | No       | `false`   | Suppress progress indicators during image pull                                                |
+| `quiet`       | No       | `false`   | Suppress image pull progress and the Connect logs shown while Connect starts                  |
 | `env`         | No       |           | Environment variables to pass to Docker container (one per line, format: KEY=VALUE)           |
 | `command`     | No       |           | Command to run against Connect (omit for start-only mode)                                     |
 | `stop`        | No       |           | Container ID to stop (use instead of starting a new container)                                |
