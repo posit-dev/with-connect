@@ -455,9 +455,10 @@ def is_port_open(
             with socket.create_connection((host, port), timeout=max(remaining, 0.1)):
                 return True
         except (socket.timeout, ConnectionRefusedError, OSError):
-            if time.monotonic() + poll_interval >= deadline:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
                 return False
-            time.sleep(poll_interval)
+            time.sleep(min(poll_interval, remaining))
 
 
 def extract_server_version(logs: str) -> str | None:
