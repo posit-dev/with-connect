@@ -30,6 +30,9 @@ inputs:
   stop:
     description: 'Container ID to stop (use instead of starting a new container)'
     required: false
+  docker-timeout:
+    description: 'Seconds to wait for each Docker API call, such as creating the container (default: 120)'
+    required: false
 
 outputs:
   CONNECT_API_KEY:
@@ -60,9 +63,14 @@ runs:
       id: run
       shell: bash
       run: |
+        DOCKER_ARGS=""
+        if [ -n "${{ inputs.docker-timeout }}" ]; then
+          DOCKER_ARGS="--docker-timeout ${{ inputs.docker-timeout }}"
+        fi
+
         # Handle stop mode
         if [ -n "${{ inputs.stop }}" ]; then
-          with-connect --stop "${{ inputs.stop }}"
+          with-connect $DOCKER_ARGS --stop "${{ inputs.stop }}"
           exit 0
         fi
 
@@ -80,6 +88,7 @@ runs:
         if [ "${{ inputs.quiet }}" = "true" ]; then
           ARGS="$ARGS --quiet"
         fi
+        ARGS="$ARGS $DOCKER_ARGS"
         if [ -n "${{ inputs.env }}" ]; then
           while IFS= read -r line; do
             if [ -n "$line" ]; then

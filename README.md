@@ -21,7 +21,7 @@ uv tool install -e .
 ## Requirements
 
 - Python 3.13+, or `uv`
-- Docker
+- Docker. `with-connect` uses `DOCKER_HOST` if it is set, otherwise the socket of the current Docker context (`docker context ls`), so Docker Desktop, Colima, and OrbStack work without extra setup.
 - A valid Posit Connect license file
 
 ## Usage
@@ -69,6 +69,7 @@ Without `bash -c`, the environment variables would be evaluated before `with-con
 | `--config`    |                         | Path to optional rstudio-connect.gcfg configuration file                                                             |
 | `--port`      | `3939`                  | Port to map the Connect container to. If not given and 3939 is in use, a free port is chosen, so multiple Connect instances can run at once. `CONNECT_SERVER` has the port in use. |
 | `-e`, `--env` |                         | Environment variables to pass to the Docker container (format: KEY=VALUE). Can be specified multiple times.          |
+| `--docker-timeout` | `120`           | Seconds to wait for each Docker API call, such as creating the container. Falls back to the `DOCKER_CLIENT_TIMEOUT` environment variable. |
 | `--stop`      |                         | Stop a running Connect container by ID, or use `CONTAINER_ID` env var if not specified.                              |
 
 Example:
@@ -132,6 +133,7 @@ The GitHub Action supports the following inputs:
 | `config-file` | No       |           | Path to rstudio-connect.gcfg configuration file                                               |
 | `port`        | No       | `3939`    | Port to map the Connect container to. If not given and 3939 is in use, a free port is chosen. The `CONNECT_SERVER` output has the port in use. |
 | `quiet`       | No       | `false`   | Suppress image pull progress and the Connect logs shown while Connect starts                  |
+| `docker-timeout` | No    | `120`     | Seconds to wait for each Docker API call, such as creating the container                      |
 | `env`         | No       |           | Environment variables to pass to Docker container (one per line, format: KEY=VALUE)           |
 | `command`     | No       |           | Command to run against Connect (omit for start-only mode)                                     |
 | `stop`        | No       |           | Container ID to stop (use instead of starting a new container)                                |

@@ -886,6 +886,137 @@ def test_docker_unreachable_is_reported():
             assert str(error) in str(e)
 
 
+def write_docker_context(config_dir, name, host, current=True):
+    """Write a Docker CLI context into a temp DOCKER_CONFIG directory."""
+    if current:
+        with open(os.path.join(config_dir, "config.json"), "w") as f:
+            json.dump({"currentContext": name}, f)
+    meta_dir = os.path.join(
+        config_dir, "contexts", "meta", hashlib.sha256(name.encode()).hexdigest()
+    )
+    os.makedirs(meta_dir)
+    meta = {"Name": name, "Metadata": {}, "Endpoints": {"docker": {"Host": host}}}
+    with open(os.path.join(meta_dir, "meta.json"), "w") as f:
+        json.dump(meta, f)
+
+
+def docker_env(config_dir, **env):
+    """Patch os.environ with only DOCKER_CONFIG and the given Docker variables."""
+    base = {k: v for k, v in os.environ.items() if k not in ("DOCKER_HOST", "DOCKER_CONTEXT", "DOCKER_CONFIG")}
+    # docker-py falls back to ~/.docker/config.json, so keep HOME away from the real one
+    return patch.dict(os.environ, {**base, "HOME": config_dir, "DOCKER_CONFIG": config_dir, **env}, clear=True)
+
+
+def test_context_docker_host_uses_current_context():
+    with tempfile.TemporaryDirectory() as config_dir:
+        write_docker_context(config_dir, "desktop-linux", "unix:///Users/me/.docker/run/docker.sock")
+        with docker_env(config_dir):
+            assert main.context_docker_host() == "unix:///Users/me/.docker/run/docker.sock"
+
+
+def test_context_docker_host_respects_docker_context():
+    with tempfile.TemporaryDirectory() as config_dir:
+        write_docker_context(config_dir, "desktop-linux", "unix:///desktop.sock")
+        write_docker_context(config_dir, "colima", "unix:///colima.sock", current=False)
+        with docker_env(config_dir, DOCKER_CONTEXT="colima"):
+            assert main.context_docker_host() == "unix:///colima.sock"
+        with docker_env(config_dir, DOCKER_CONTEXT="default"):
+            assert main.context_docker_host() is None
+
+
+def test_context_docker_host_defers_to_docker_host():
+    with tempfile.TemporaryDirectory() as config_dir:
+        write_docker_context(config_dir, "desktop-linux", "unix:///desktop.sock")
+        with docker_env(config_dir, DOCKER_HOST="tcp://example.com:2376"):
+            assert main.context_docker_host() is None
+
+
+def test_context_docker_host_falls_back_to_default():
+    hosts = ["unix:///var/run/docker.sock", "tcp://example.com:2376", "ssh://me@example.com"]
+    for host in hosts:
+        with tempfile.TemporaryDirectory() as config_dir:
+            write_docker_context(config_dir, "other", host)
+            with docker_env(config_dir):
+                assert main.context_docker_host() is None, host
+    # No config file, a missing context, and a corrupt context all use the default
+    with tempfile.TemporaryDirectory() as config_dir:
+        with docker_env(config_dir):
+            assert main.context_docker_host() is None
+        with open(os.path.join(config_dir, "config.json"), "w") as f:
+            json.dump({"currentContext": "missing"}, f)
+        with docker_env(config_dir):
+            assert main.context_docker_host() is None
+        meta_dir = os.path.join(config_dir, "contexts", "meta", hashlib.sha256(b"missing").hexdigest())
+        os.makedirs(meta_dir)
+        with open(os.path.join(meta_dir, "meta.json"), "w") as f:
+            f.write("not json")
+        with docker_env(config_dir):
+            assert main.context_docker_host() is None
+
+
+def test_docker_client_uses_context_host_and_timeout():
+    docker_host = os.environ.get("DOCKER_HOST")
+    with (
+        patch.object(main, "context_docker_host", return_value="unix:///desktop.sock"),
+        patch.object(main.docker, "from_env") as from_env,
+    ):
+        main.docker_client(timeout=300)
+    assert from_env.call_args.kwargs["timeout"] == 300
+    assert from_env.call_args.kwargs["environment"]["DOCKER_HOST"] == "unix:///desktop.sock"
+    # The context host is passed to docker-py, not set in this process
+    assert os.environ.get("DOCKER_HOST") == docker_host
+
+    with (
+        patch.object(main, "context_docker_host", return_value=None),
+        patch.object(main.docker, "from_env") as from_env,
+        patch.dict(os.environ, {"DOCKER_HOST": "tcp://example.com:2376"}),
+    ):
+        main.docker_client()
+    assert from_env.call_args.kwargs["timeout"] == main.DOCKER_TIMEOUT
+    assert from_env.call_args.kwargs["environment"]["DOCKER_HOST"] == "tcp://example.com:2376"
+
+    # A context socket that isn't reachable is named in the error
+    with (
+        patch.object(main, "context_docker_host", return_value="unix:///desktop.sock"),
+        patch.object(main.docker, "from_env", side_effect=docker.errors.DockerException("no socket")),
+    ):
+        try:
+            main.docker_client()
+            assert False, "Expected RuntimeError"
+        except RuntimeError as e:
+            assert "Could not connect to Docker at unix:///desktop.sock" in str(e)
+
+
+def test_docker_timeout_option():
+    with patch.dict(os.environ):
+        os.environ.pop("DOCKER_CLIENT_TIMEOUT", None)
+        assert parse_with_argv().docker_timeout == main.DOCKER_TIMEOUT
+        assert parse_with_argv("--docker-timeout", "300").docker_timeout == 300
+        assert parse_with_argv("--docker-timeout", "0.5").docker_timeout == 0.5
+
+        os.environ["DOCKER_CLIENT_TIMEOUT"] = "240"
+        assert parse_with_argv().docker_timeout == 240
+        # The flag wins over the environment variable
+        assert parse_with_argv("--docker-timeout", "30").docker_timeout == 30
+
+
+def test_invalid_docker_timeout_is_rejected():
+    with patch.dict(os.environ):
+        os.environ.pop("DOCKER_CLIENT_TIMEOUT", None)
+        for value in ("0", "-5", "inf", "nan"):
+            code, output = parse_exit("--docker-timeout", value)
+            assert code == 2
+            assert f"{value} is not a valid timeout" in output
+        code, output = parse_exit("--docker-timeout", "abc")
+        assert code == 2
+        assert "invalid timeout value: 'abc'" in output
+
+        os.environ["DOCKER_CLIENT_TIMEOUT"] = "soon"
+        code, output = parse_exit()
+        assert code == 2
+        assert "DOCKER_CLIENT_TIMEOUT: invalid timeout value: 'soon'" in output
+
+
 def test_main_prints_short_error():
     output = io.StringIO()
     with patch.object(main, "run", side_effect=RuntimeError("boom")), redirect_stderr(output):
@@ -1112,6 +1243,27 @@ if __name__ == "__main__":
 
     test_docker_unreachable_is_reported()
     print("✓ test_docker_unreachable_is_reported passed")
+
+    test_context_docker_host_uses_current_context()
+    print("✓ test_context_docker_host_uses_current_context passed")
+
+    test_context_docker_host_respects_docker_context()
+    print("✓ test_context_docker_host_respects_docker_context passed")
+
+    test_context_docker_host_defers_to_docker_host()
+    print("✓ test_context_docker_host_defers_to_docker_host passed")
+
+    test_context_docker_host_falls_back_to_default()
+    print("✓ test_context_docker_host_falls_back_to_default passed")
+
+    test_docker_client_uses_context_host_and_timeout()
+    print("✓ test_docker_client_uses_context_host_and_timeout passed")
+
+    test_docker_timeout_option()
+    print("✓ test_docker_timeout_option passed")
+
+    test_invalid_docker_timeout_is_rejected()
+    print("✓ test_invalid_docker_timeout_is_rejected passed")
 
     test_main_prints_short_error()
     print("✓ test_main_prints_short_error passed")
