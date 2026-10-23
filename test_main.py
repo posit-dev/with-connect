@@ -77,7 +77,7 @@ def test_invalid_license_detection():
     except RuntimeError as e:
         assert "Unable to obtain a valid license" in str(e)
         assert "expired or invalid" in str(e)
-        # main() stops the container when this raises
+        # run() stops the container when this raises
         mock_container.stop.assert_not_called()
 
 
@@ -410,7 +410,7 @@ def test_missing_command_fails_before_starting_connect():
             output = io.StringIO()
             argv = ["with-connect", "--license", license_file.name, "--", "no-such-command-xyz"]
             with patch.object(sys, "argv", argv), redirect_stderr(output):
-                result_code = main.main()
+                result_code = main.run()
 
     assert result_code == 127
     assert "command not found: no-such-command-xyz" in output.getvalue()
@@ -500,7 +500,7 @@ def test_stop_mode_signals_connect():
         patch.object(main.docker, "from_env", return_value=client),
         redirect_stderr(io.StringIO()),
     ):
-        assert main.main() == 0
+        assert main.run() == 0
 
     container.exec_run.assert_called_once_with(
         ["pkill", "-TERM", "-f", main.CONNECT_PROCESS_PATTERN]
@@ -509,7 +509,7 @@ def test_stop_mode_signals_connect():
 
 def test_command_mode_signals_connect_after_command():
     client = MagicMock()
-    container = client.containers.run.return_value
+    container = client.containers.create.return_value
     container.exec_run.return_value = (0, b"")
     with tempfile.NamedTemporaryFile(suffix=".lic") as license_file:
         argv = ["with-connect", "--license", license_file.name, "--", "true"]
@@ -523,7 +523,7 @@ def test_command_mode_signals_connect_after_command():
             patch.object(main.subprocess, "run", return_value=Mock(returncode=0)),
             redirect_stderr(io.StringIO()),
         ):
-            assert main.main() == 0
+            assert main.run() == 0
 
     container.exec_run.assert_called_once_with(
         ["pkill", "-TERM", "-f", main.CONNECT_PROCESS_PATTERN]
@@ -623,8 +623,8 @@ def test_post_bootstrap_raises_on_other_errors():
 
 
 
-def run_main_with_client(client):
-    """Run main() against a mock Docker client, expecting a RuntimeError."""
+def run_with_client(client):
+    """Run run() against a mock Docker client, expecting a RuntimeError."""
     with tempfile.NamedTemporaryFile(suffix=".lic") as license_file:
         argv = ["with-connect", "--license", license_file.name, "--quiet"]
         with (
@@ -633,7 +633,7 @@ def run_main_with_client(client):
             patch.object(main, "ensure_image"),
         ):
             try:
-                main.main()
+                main.run()
             except RuntimeError as e:
                 return str(e)
     raise AssertionError("Expected RuntimeError")
@@ -648,7 +648,7 @@ def test_container_create_error_is_reported():
         client = MagicMock()
         client.containers.create.side_effect = error
 
-        message = run_main_with_client(client)
+        message = run_with_client(client)
 
         assert "Failed to create container from" in message
         assert str(error) in message
@@ -660,7 +660,7 @@ def test_container_start_error_removes_container():
     container = client.containers.create.return_value
     container.start.side_effect = error
 
-    message = run_main_with_client(client)
+    message = run_with_client(client)
 
     assert "Failed to start container from" in message
     assert str(error) in message
@@ -673,7 +673,7 @@ def test_container_start_error_survives_failed_cleanup():
     container.start.side_effect = docker.errors.APIError("port is already allocated")
     container.remove.side_effect = docker.errors.APIError("removal failed")
 
-    message = run_main_with_client(client)
+    message = run_with_client(client)
 
     assert "port is already allocated" in message
 
@@ -686,7 +686,7 @@ def test_stop_error_is_reported():
         patch.object(main.docker, "from_env", return_value=client),
     ):
         try:
-            main.main()
+            main.run()
             assert False, "Expected RuntimeError"
         except RuntimeError as e:
             assert "Failed to stop container abc123" in str(e)
@@ -702,7 +702,7 @@ def test_cleanup_stop_error_does_not_hide_original_error():
 
     stderr = io.StringIO()
     with patch.object(main, "is_port_open", return_value=False), redirect_stderr(stderr):
-        message = run_main_with_client(client)
+        message = run_with_client(client)
 
     assert "did not start within 60 seconds" in message
     assert "Warning: failed to stop container abc123: daemon went away" in stderr.getvalue()
@@ -718,21 +718,21 @@ def test_docker_unreachable_is_reported():
             assert str(error) in str(e)
 
 
-def test_cli_prints_short_error():
+def test_main_prints_short_error():
     output = io.StringIO()
-    with patch.object(main, "main", side_effect=RuntimeError("boom")), redirect_stderr(output):
+    with patch.object(main, "run", side_effect=RuntimeError("boom")), redirect_stderr(output):
         try:
-            main.cli()
+            main.main()
             assert False, "Expected SystemExit"
         except SystemExit as e:
             assert e.code == 1
     assert output.getvalue() == "Error: boom\n"
 
 
-def test_installed_command_uses_cli():
+def test_installed_command_uses_main():
     with open(os.path.join(os.path.dirname(__file__), "pyproject.toml"), "rb") as f:
         scripts = tomllib.load(f)["project"]["scripts"]
-    assert scripts["with-connect"] == "main:cli"
+    assert scripts["with-connect"] == "main:main"
 
 if __name__ == "__main__":
     test_license_file_not_exists()
@@ -909,10 +909,10 @@ if __name__ == "__main__":
     test_docker_unreachable_is_reported()
     print("✓ test_docker_unreachable_is_reported passed")
 
-    test_cli_prints_short_error()
-    print("✓ test_cli_prints_short_error passed")
+    test_main_prints_short_error()
+    print("✓ test_main_prints_short_error passed")
 
-    test_installed_command_uses_cli()
-    print("✓ test_installed_command_uses_cli passed")
+    test_installed_command_uses_main()
+    print("✓ test_installed_command_uses_main passed")
 
     print("\nAll tests passed!")

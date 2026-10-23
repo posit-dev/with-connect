@@ -367,9 +367,9 @@ def stop_connect_container(container) -> None:
     container.stop(timeout=2)
 
 
-def main() -> int:
+def run() -> int:
     """
-    Main entry point for the with-connect CLI tool.
+    Run the with-connect workflow and return the exit code.
 
     Orchestrates the full workflow:
     1. Parse arguments and validate file paths
@@ -707,16 +707,18 @@ def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
         raise RuntimeError(f"Failed to bootstrap Connect and retrieve API key: {e}")
 
 
-def cli() -> None:
+def main() -> None:
     """
-    Console entry point: run main() and report errors as a short message.
+    Main entry point for the with-connect CLI tool.
+
+    Runs the workflow and reports errors as a short message.
     """
     try:
-        sys.exit(main())
+        sys.exit(run())
     except RuntimeError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
 
 
 if __name__ == "__main__":
-    cli()
+    main()
