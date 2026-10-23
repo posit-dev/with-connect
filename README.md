@@ -85,6 +85,8 @@ with-connect -e MY_VAR=value -e ANOTHER_VAR=123 -- rsconnect deploy manifest .
 
 You can use this to override Connect server configuration by passing in `CONNECT_` prefixed variables, following https://docs.posit.co/connect/admin/appendix/configuration/#environment-variables.
 
+with-connect reads Connect's service log from the container's output to tell when Connect has started, so it sets `CONNECT_LOGGING_SERVICELOG=STDOUT` and `CONNECT_LOGGING_SERVICELOGLEVEL=INFO`. These take precedence over the `[Logging]` section of a `--config` file. To override them anyway, pass them with `-e`.
+
 If you need env vars that are useful for the command running after `--`, just set them in the environment from which you call `with-connect`: the command will inherit that environment.
 
 ### Start-Only Mode
