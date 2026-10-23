@@ -1,15 +1,18 @@
 import argparse
 import base64
+import hashlib
+import hmac
+import json
 import os
 import re
 import socket
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
 
 import docker
-from rsconnect.api import RSConnectClient, RSConnectServer
-from rsconnect.json_web_token import TokenGenerator
 
 
 IMAGE = "ghcr.io/posit-dev/connect"
@@ -484,6 +487,62 @@ def wait_for_http_server(
     return False
 
 
+def make_bootstrap_jwt(secret: bytes, now: float | None = None) -> str:
+    """
+    Create an HS256-signed JWT for Connect's bootstrap endpoint.
+
+    Connect requires exactly these issuer, audience, and scope values (they
+    are hard-coded to match what rsconnect-python sends), plus iat and exp.
+    """
+    if now is None:
+        now = time.time()
+    header = {"alg": "HS256", "typ": "JWT"}
+    claims = {
+        "iss": "rsconnect-python",
+        "aud": "rsconnect",
+        "scope": "bootstrap",
+        "iat": int(now),
+        "exp": int(now) + 15 * 60,
+    }
+
+    def b64url(data: bytes) -> str:
+        return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+    def encode_json(obj: dict) -> str:
+        return b64url(json.dumps(obj, separators=(",", ":")).encode("utf-8"))
+
+    signing_input = f"{encode_json(header)}.{encode_json(claims)}"
+    signature = hmac.new(secret, signing_input.encode("ascii"), hashlib.sha256).digest()
+    return f"{signing_input}.{b64url(signature)}"
+
+
+def post_bootstrap(server_url: str, token: str) -> dict:
+    """
+    POST to Connect's bootstrap endpoint and return the decoded JSON response.
+
+    Connect 2024.05.0 added v1/bootstrap; earlier versions only have
+    v1/experimental/bootstrap, so fall back to that on a 404.
+    """
+    for path in ("v1/bootstrap", "v1/experimental/bootstrap"):
+        request = urllib.request.Request(
+            f"{server_url.rstrip('/')}/__api__/{path}",
+            method="POST",
+            headers={
+                "Authorization": f"Connect-Bootstrap {token}",
+                "Accept": "application/json",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.loads(response.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 404 and path == "v1/bootstrap":
+                continue
+            body = e.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"HTTP {e.code} from {path}: {body}")
+    raise AssertionError("unreachable")
+
+
 def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
     """
     Bootstrap Connect and retrieve an API key.
@@ -493,31 +552,14 @@ def get_api_key(bootstrap_secret: str, container, server_url: str) -> str:
     commands run against the Connect instance. Requires Connect 2022.10.0+.
     """
     try:
-        # Generate bootstrap token from secret
         # The bootstrap_secret we received is base64-encoded, need to decode it
         secret_bytes = base64.b64decode(bootstrap_secret.encode("utf-8"))
-        token_gen = TokenGenerator(secret_bytes)
-        bootstrap_token = token_gen.bootstrap()
+        response = post_bootstrap(server_url, make_bootstrap_jwt(secret_bytes))
 
-        # Create server connection with bootstrap JWT
-        server = RSConnectServer(server_url, None, bootstrap_jwt=bootstrap_token)
-        client = RSConnectClient(server)
-
-        # Call bootstrap endpoint
-        response = client.bootstrap()
-
-        # Extract API key from response
-        if response and "api_key" in response:
-            api_key = response["api_key"]
-            if not api_key:
-                print("\nContainer logs:", file=sys.stderr)
-                print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
-                raise RuntimeError("Bootstrap succeeded but returned empty API key")
-            return api_key
-        else:
-            print("\nContainer logs:", file=sys.stderr)
-            print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
+        api_key = response.get("api_key") if isinstance(response, dict) else None
+        if not api_key:
             raise RuntimeError(f"Bootstrap returned unexpected response: {response}")
+        return api_key
     except Exception as e:
         print("\nContainer logs:", file=sys.stderr)
         print(container.logs().decode("utf-8", errors="replace"), file=sys.stderr)
