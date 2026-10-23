@@ -25,6 +25,9 @@ VERSION = "release"
 REGISTRY_CUTOVER_YEAR = 2026
 REGISTRY_CUTOVER_MONTH = 4
 
+# Matches the Connect server's command line, for pkill -f
+CONNECT_PROCESS_PATTERN = "^/opt/rstudio-connect/bin/connect( |$)"
+
 DESCRIPTION = """\
 Starts Posit Connect in Docker and waits until it is ready.
 
@@ -274,6 +277,28 @@ def get_docker_tag(version: str) -> tuple[str, str]:
         return (LEGACY_IMAGE, version)
 
 
+def stop_container(container) -> None:
+    """
+    Stop a Connect container promptly.
+
+    Newer images run startup.sh as PID 1, and a shell running as PID 1
+    ignores SIGTERM, so container.stop() waits out its 10 second grace
+    period and then kills the container. Signaling the Connect process
+    directly lets it shut down cleanly in under a second, and the container
+    exits with it. If that doesn't work, fall back to a short stop timeout.
+    """
+    try:
+        exit_code, _ = container.exec_run(
+            ["pkill", "-TERM", "-f", CONNECT_PROCESS_PATTERN]
+        )
+        if exit_code == 0:
+            container.wait(timeout=10)
+            return
+    except Exception:
+        pass  # e.g. no pkill in the image, or Connect didn't exit in time
+    container.stop(timeout=2)
+
+
 def main() -> int:
     """
     Main entry point for the with-connect CLI tool.
@@ -297,7 +322,7 @@ def main() -> int:
         client = docker.from_env()
         try:
             container = client.containers.get(container_id)
-            container.stop()
+            stop_container(container)
             print(f"Stopped container {container_id}", file=sys.stderr)
             return 0
         except docker.errors.NotFound:
@@ -417,7 +442,7 @@ def main() -> int:
         return exit_code
     finally:
         if stop_container:
-            container.stop()
+            stop_container(container)
 
 
 def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:
@@ -476,7 +501,6 @@ def wait_for_http_server(
         if "Unable to obtain a valid license" in logs:
             print("\nContainer logs:", file=sys.stderr)
             print(logs, file=sys.stderr)
-            container.stop()
             raise RuntimeError(
                 "Unable to obtain a valid license. Your Posit Connect license may be expired or invalid. Please check your license file."
             )
