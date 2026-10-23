@@ -468,6 +468,16 @@ if __name__ == "__main__":
 
     test_valid_license_http_server_starts()
     print("✓ test_valid_license_http_server_starts passed")
+
+    test_image_and_version_exclusive()
+    print("✓ test_image_and_version_exclusive passed")
+
+    test_image_without_tag()
+    print("✓ test_image_without_tag passed")
+
+    test_image_with_tag()
+    print("✓ test_image_with_tag passed")
+
     test_get_docker_tag_latest()
     print("✓ test_get_docker_tag_latest passed")
 
@@ -500,22 +510,15 @@ if __name__ == "__main__":
 
     test_extract_server_version_dev()
     print("✓ test_extract_server_version_dev passed")
+
     test_is_port_open_retries_until_port_opens()
     print("✓ test_is_port_open_retries_until_port_opens passed")
+
     test_is_port_open_times_out_on_closed_port()
     print("✓ test_is_port_open_times_out_on_closed_port passed")
+
     test_is_port_open_stops_when_container_exits()
     print("✓ test_is_port_open_stops_when_container_exits passed")
-
-    test_image_and_version_exclusive()
-    print("✓ test_image_and_version_exclusive passed")
-
-    test_image_without_tag()
-    print("✓ test_image_without_tag passed")
-
-    test_image_with_tag()
-    print("✓ test_image_with_tag passed")
-
 
     test_local_image_usage()
     print("✓ test_local_image_usage passed")
