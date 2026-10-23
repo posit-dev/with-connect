@@ -395,6 +395,8 @@ def main() -> int:
             return 0
         except docker.errors.NotFound:
             raise RuntimeError(f"Container not found: {container_id}")
+        except Exception as e:
+            raise RuntimeError(f"Failed to stop container {container_id}: {e}")
 
     # Fail before starting Connect if the command can't be run
     if args.command:
@@ -528,7 +530,15 @@ def main() -> int:
         return exit_code
     finally:
         if stop_container:
-            stop_connect_container(container)
+            # Warn instead of raising so a stop failure doesn't replace the
+            # command's exit code or an error that is already being raised
+            try:
+                stop_connect_container(container)
+            except Exception as e:
+                print(
+                    f"Warning: failed to stop container {container.id}: {e}",
+                    file=sys.stderr,
+                )
 
 
 def is_port_open(

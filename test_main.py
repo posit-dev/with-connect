@@ -678,6 +678,35 @@ def test_container_start_error_survives_failed_cleanup():
     assert "port is already allocated" in message
 
 
+def test_stop_error_is_reported():
+    client = MagicMock()
+    client.containers.get.return_value.stop.side_effect = docker.errors.APIError("permission denied")
+    with (
+        patch.object(sys, "argv", ["with-connect", "--stop", "abc123"]),
+        patch.object(main.docker, "from_env", return_value=client),
+    ):
+        try:
+            main.main()
+            assert False, "Expected RuntimeError"
+        except RuntimeError as e:
+            assert "Failed to stop container abc123" in str(e)
+            assert "permission denied" in str(e)
+
+
+def test_cleanup_stop_error_does_not_hide_original_error():
+    client = MagicMock()
+    container = client.containers.create.return_value
+    container.id = "abc123"
+    container.logs.return_value = b""
+    container.stop.side_effect = docker.errors.APIError("daemon went away")
+
+    stderr = io.StringIO()
+    with patch.object(main, "is_port_open", return_value=False), redirect_stderr(stderr):
+        message = run_main_with_client(client)
+
+    assert "did not start within 60 seconds" in message
+    assert "Warning: failed to stop container abc123: daemon went away" in stderr.getvalue()
+
 def test_docker_unreachable_is_reported():
     error = docker.errors.DockerException("Error while fetching server API version")
     with patch.object(main.docker, "from_env", side_effect=error):
@@ -870,6 +899,12 @@ if __name__ == "__main__":
 
     test_container_start_error_survives_failed_cleanup()
     print("✓ test_container_start_error_survives_failed_cleanup passed")
+
+    test_stop_error_is_reported()
+    print("✓ test_stop_error_is_reported passed")
+
+    test_cleanup_stop_error_does_not_hide_original_error()
+    print("✓ test_cleanup_stop_error_does_not_hide_original_error passed")
 
     test_docker_unreachable_is_reported()
     print("✓ test_docker_unreachable_is_reported passed")
