@@ -334,6 +334,75 @@ def test_no_command_without_separator():
     assert parse_with_argv("--quiet").command == []
 
 
+def test_separator_without_command_is_rejected():
+    code, output = parse_exit("--quiet", "--")
+
+    assert code == 2
+    assert "no command given after --" in output
+
+
+def test_missing_command_fails_before_starting_connect():
+    with tempfile.NamedTemporaryFile(suffix=".lic") as license_file:
+        with patch.object(main.docker, "from_env") as from_env:
+            output = io.StringIO()
+            argv = ["with-connect", "--license", license_file.name, "--", "no-such-command-xyz"]
+            with patch.object(sys, "argv", argv), redirect_stderr(output):
+                result_code = main.main()
+
+    assert result_code == 127
+    assert "command not found: no-such-command-xyz" in output.getvalue()
+    from_env.assert_not_called()
+
+
+def test_check_command():
+    assert main.check_command(sys.executable) is None
+    with redirect_stderr(io.StringIO()):
+        assert main.check_command("no-such-command-xyz") == 127
+        assert main.check_command("./no-such-script.sh") == 127
+
+
+def test_check_command_not_executable():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        script = os.path.join(tmpdir, "script.sh")
+        with open(script, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(script, 0o644)
+
+        output = io.StringIO()
+        with redirect_stderr(output):
+            assert main.check_command(script) == 126
+            with patch.dict(os.environ, {"PATH": tmpdir}):
+                assert main.check_command("script.sh") == 126
+        assert "permission denied" in output.getvalue()
+
+
+def test_check_command_empty_path_entry_searches_current_directory():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with open(os.path.join(tmpdir, "script.sh"), "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(os.path.join(tmpdir, "script.sh"), 0o644)
+
+        cwd = os.getcwd()
+        os.chdir(tmpdir)
+        try:
+            with patch.dict(os.environ, {"PATH": os.pathsep}), redirect_stderr(io.StringIO()):
+                assert main.check_command("script.sh") == 126
+        finally:
+            os.chdir(cwd)
+
+
+def test_check_command_directory():
+    with tempfile.TemporaryDirectory() as tmpdir:
+        os.mkdir(os.path.join(tmpdir, "subdir"))
+
+        with redirect_stderr(io.StringIO()):
+            # Running a directory by path is a permission error
+            assert main.check_command(os.path.join(tmpdir, "subdir")) == 126
+            # A PATH search skips directories
+            with patch.dict(os.environ, {"PATH": tmpdir}):
+                assert main.check_command("subdir") == 127
+
+
 def test_stop_nonexistent_container():
     """Test that --stop with nonexistent container returns error."""
     result = subprocess.run(
@@ -506,6 +575,24 @@ if __name__ == "__main__":
 
     test_no_command_without_separator()
     print("✓ test_no_command_without_separator passed")
+
+    test_separator_without_command_is_rejected()
+    print("✓ test_separator_without_command_is_rejected passed")
+
+    test_missing_command_fails_before_starting_connect()
+    print("✓ test_missing_command_fails_before_starting_connect passed")
+
+    test_check_command()
+    print("✓ test_check_command passed")
+
+    test_check_command_not_executable()
+    print("✓ test_check_command_not_executable passed")
+
+    test_check_command_empty_path_entry_searches_current_directory()
+    print("✓ test_check_command_empty_path_entry_searches_current_directory passed")
+
+    test_check_command_directory()
+    print("✓ test_check_command_directory passed")
 
     test_stop_nonexistent_container()
     print("✓ test_stop_nonexistent_container passed")
