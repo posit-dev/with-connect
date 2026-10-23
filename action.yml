@@ -64,22 +64,24 @@ runs:
       id: run
       shell: bash
       run: |
+        DOCKER_ARGS=""
+        if [ -n "${{ inputs.docker-timeout }}" ]; then
+          DOCKER_ARGS="--docker-timeout ${{ inputs.docker-timeout }}"
+        fi
+
         # Handle stop mode
         if [ -n "${{ inputs.stop }}" ]; then
-          with-connect --stop "${{ inputs.stop }}"
+          with-connect $DOCKER_ARGS --stop "${{ inputs.stop }}"
           exit 0
         fi
 
         # Build arguments
-        ARGS="--version ${{ inputs.version }} --port ${{ inputs.port }}"
+        ARGS="--version ${{ inputs.version }} --port ${{ inputs.port }} $DOCKER_ARGS"
         if [ -n "${{ inputs.config-file }}" ]; then
           ARGS="$ARGS --config ${{ inputs.config-file }}"
         fi
         if [ -n "${{ inputs.image }}" ]; then
           ARGS="$ARGS --image ${{ inputs.image }}"
-        fi
-        if [ -n "${{ inputs.docker-timeout }}" ]; then
-          ARGS="$ARGS --docker-timeout ${{ inputs.docker-timeout }}"
         fi
         if [ "${{ inputs.quiet }}" = "true" ]; then
           ARGS="$ARGS --quiet"
