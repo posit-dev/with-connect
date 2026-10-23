@@ -277,7 +277,7 @@ def get_docker_tag(version: str) -> tuple[str, str]:
         return (LEGACY_IMAGE, version)
 
 
-def stop_container(container) -> None:
+def stop_connect_container(container) -> None:
     """
     Stop a Connect container promptly.
 
@@ -322,7 +322,7 @@ def main() -> int:
         client = docker.from_env()
         try:
             container = client.containers.get(container_id)
-            stop_container(container)
+            stop_connect_container(container)
             print(f"Stopped container {container_id}", file=sys.stderr)
             return 0
         except docker.errors.NotFound:
@@ -442,7 +442,7 @@ def main() -> int:
         return exit_code
     finally:
         if stop_container:
-            stop_container(container)
+            stop_connect_container(container)
 
 
 def is_port_open(host: str, port: int, timeout: float = 30.0) -> bool:

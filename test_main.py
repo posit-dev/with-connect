@@ -348,11 +348,11 @@ def test_stop_nonexistent_container():
     assert "Container not found" in result.stderr
 
 
-def test_stop_container_signals_connect():
+def test_stop_connect_container_signals_connect():
     container = MagicMock()
     container.exec_run.return_value = (0, b"")
 
-    main.stop_container(container)
+    main.stop_connect_container(container)
 
     container.exec_run.assert_called_once_with(
         ["pkill", "-TERM", "-f", main.CONNECT_PROCESS_PATTERN]
@@ -361,19 +361,58 @@ def test_stop_container_signals_connect():
     container.stop.assert_not_called()
 
 
-def test_stop_container_falls_back_when_connect_not_signaled():
+def test_stop_mode_signals_connect():
+    client = MagicMock()
+    container = client.containers.get.return_value
+    container.exec_run.return_value = (0, b"")
+    with (
+        patch.object(sys, "argv", ["with-connect", "--stop", "abc123"]),
+        patch.object(main.docker, "from_env", return_value=client),
+        redirect_stderr(io.StringIO()),
+    ):
+        assert main.main() == 0
+
+    container.exec_run.assert_called_once_with(
+        ["pkill", "-TERM", "-f", main.CONNECT_PROCESS_PATTERN]
+    )
+
+
+def test_command_mode_signals_connect_after_command():
+    client = MagicMock()
+    container = client.containers.run.return_value
+    container.exec_run.return_value = (0, b"")
+    with tempfile.NamedTemporaryFile(suffix=".lic") as license_file:
+        argv = ["with-connect", "--license", license_file.name, "--", "true"]
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(main.docker, "from_env", return_value=client),
+            patch.object(main, "ensure_image"),
+            patch.object(main, "is_port_open", return_value=True),
+            patch.object(main, "wait_for_http_server", return_value=True),
+            patch.object(main, "get_api_key", return_value="key"),
+            patch.object(main.subprocess, "run", return_value=Mock(returncode=0)),
+            redirect_stderr(io.StringIO()),
+        ):
+            assert main.main() == 0
+
+    container.exec_run.assert_called_once_with(
+        ["pkill", "-TERM", "-f", main.CONNECT_PROCESS_PATTERN]
+    )
+
+
+def test_stop_connect_container_falls_back_when_connect_not_signaled():
     # pkill exits 1 when nothing matches and 127 when it isn't installed
     for exit_code in (1, 127):
         container = MagicMock()
         container.exec_run.return_value = (exit_code, b"")
 
-        main.stop_container(container)
+        main.stop_connect_container(container)
 
         container.wait.assert_not_called()
         container.stop.assert_called_once_with(timeout=2)
 
 
-def test_stop_container_falls_back_on_errors():
+def test_stop_connect_container_falls_back_on_errors():
     exec_failure = MagicMock()
     exec_failure.exec_run.side_effect = docker.errors.APIError("container is not running")
     wait_timeout = MagicMock()
@@ -381,7 +420,7 @@ def test_stop_container_falls_back_on_errors():
     wait_timeout.wait.side_effect = requests.exceptions.ReadTimeout("Read timed out.")
 
     for container in (exec_failure, wait_timeout):
-        main.stop_container(container)
+        main.stop_connect_container(container)
 
         container.stop.assert_called_once_with(timeout=2)
 
@@ -550,14 +589,20 @@ if __name__ == "__main__":
     test_stop_nonexistent_container()
     print("✓ test_stop_nonexistent_container passed")
 
-    test_stop_container_signals_connect()
-    print("✓ test_stop_container_signals_connect passed")
+    test_stop_connect_container_signals_connect()
+    print("✓ test_stop_connect_container_signals_connect passed")
 
-    test_stop_container_falls_back_when_connect_not_signaled()
-    print("✓ test_stop_container_falls_back_when_connect_not_signaled passed")
+    test_stop_mode_signals_connect()
+    print("✓ test_stop_mode_signals_connect passed")
 
-    test_stop_container_falls_back_on_errors()
-    print("✓ test_stop_container_falls_back_on_errors passed")
+    test_command_mode_signals_connect_after_command()
+    print("✓ test_command_mode_signals_connect_after_command passed")
+
+    test_stop_connect_container_falls_back_when_connect_not_signaled()
+    print("✓ test_stop_connect_container_falls_back_when_connect_not_signaled passed")
+
+    test_stop_connect_container_falls_back_on_errors()
+    print("✓ test_stop_connect_container_falls_back_on_errors passed")
 
     test_make_bootstrap_jwt()
     print("✓ test_make_bootstrap_jwt passed")
